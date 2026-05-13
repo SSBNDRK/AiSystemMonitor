@@ -1,0 +1,320 @@
+﻿<Window x:Class="AiSystemMonitor.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TechBro PC Monitor" Height="600" Width="800"
+        Background="#1E1E2E" WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <Style x:Key="ToggleSwitchStyle" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#BAC2DE"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal">
+                            <Border x:Name="Border" Width="40" Height="22" CornerRadius="11" Background="#45475A" Margin="0,0,10,0">
+                                <Ellipse x:Name="Knob" Width="16" Height="16" Fill="#BAC2DE" HorizontalAlignment="Left" Margin="3,0,0,0">
+                                    <Ellipse.RenderTransform>
+                                        <TranslateTransform x:Name="KnobTransform" X="0"/>
+                                    </Ellipse.RenderTransform>
+                                </Ellipse>
+                            </Border>
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#A6E3A1"/>
+                                <Setter TargetName="Knob" Property="Fill" Value="#1E1E2E"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="KnobTransform" Storyboard.TargetProperty="X" To="18" Duration="0:0:0.15"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="KnobTransform" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.15"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ScrollBar">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid>
+                            <Border Background="Transparent" CornerRadius="4"/>
+                            <Track x:Name="PART_Track" IsDirectionReversed="true">
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border Background="#45475A" CornerRadius="8" Margin="0,2,0,2"/>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ToolTip">
+            <Setter Property="Background" Value="#181825"/>
+            <Setter Property="Foreground" Value="#BAC2DE"/>
+            <Setter Property="BorderBrush" Value="#313244"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8">
+                            <ContentPresenter Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ContextMenu">
+            <Setter Property="Background" Value="#181825"/>
+            <Setter Property="Foreground" Value="#BAC2DE"/>
+            <Setter Property="BorderBrush" Value="#313244"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="6">
+                            <ItemsPresenter/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="MenuItem">
+            <Setter Property="Foreground" Value="#BAC2DE"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="25,8,25,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+                            <ContentPresenter ContentSource="Header" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#313244"/>
+                                <Setter Property="Foreground" Value="#CDD6F4"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#585B70"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SidebarButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" CornerRadius="12" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#313244"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="SidebarColumn" Width="250"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="#181825" BorderBrush="#313244" BorderThickness="0,0,1,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Button x:Name="ToggleSidebarButton" Grid.Row="0" Style="{StaticResource SidebarButtonStyle}" Width="40" Height="40" HorizontalAlignment="Left" Margin="10,15,0,0" Click="ToggleSidebarButton_Click">
+                    <Path Width="18" Height="18" Fill="#BAC2DE" Stretch="Uniform" Data="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Button>
+                
+                <StackPanel x:Name="SidebarContentPanel" Grid.Row="1" Margin="15,-50,15,0" VerticalAlignment="Top">
+
+                    <StackPanel x:Name="ClockPanel" HorizontalAlignment="Center" Margin="0,0,0,15">
+                        <TextBlock x:Name="TimeText" Text="00:00" Foreground="#CDD6F4" FontSize="42" FontWeight="Light" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="DateText" Text="понеділок, 11 травня 2026" Foreground="#A6ADC8" FontSize="12" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                    </StackPanel>
+
+                    <Border Height="1" Background="#313244" Margin="15,0,15,15" HorizontalAlignment="Stretch"/>
+
+                    <TextBlock Text="СТАТУС СИСТЕМИ" Foreground="#BAC2DE" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,15" HorizontalAlignment="Center"/>
+                   
+                    <TextBlock Text="Навантаження CPU:" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,4"/>
+                    <Border CornerRadius="5" ClipToBounds="True" Height="10" Background="#313244">
+                        <ProgressBar x:Name="CpuProgressBar" Maximum="100" Value="0" Foreground="#A6E3A1" Background="Transparent" BorderThickness="0"/>
+                    </Border>
+                    <TextBlock x:Name="CpuText" Text="0%" Foreground="#BAC2DE" FontSize="12" TextAlignment="Right" Margin="0,2,0,10"/>
+
+                    <TextBlock Text="Використання RAM:" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,4"/>
+                    <Border CornerRadius="5" ClipToBounds="True" Height="10" Background="#313244">
+                        <ProgressBar x:Name="RamProgressBar" Maximum="100" Value="0" Foreground="#F9E2AF" Background="Transparent" BorderThickness="0"/>
+                    </Border>
+                    <TextBlock x:Name="RamText" Text="0 / 16 GB" Foreground="#BAC2DE" FontSize="12" TextAlignment="Right" Margin="0,2,0,10"/>
+
+                    <TextBlock Text="Навантаження GPU:" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,4"/>
+                    <Border CornerRadius="5" ClipToBounds="True" Height="10" Background="#313244">
+                        <ProgressBar x:Name="GpuProgressBar" Maximum="100" Value="0" Foreground="#89B4FA" Background="Transparent" BorderThickness="0"/>
+                    </Border>
+                    <TextBlock x:Name="GpuText" Text="0%" Foreground="#BAC2DE" FontSize="12" TextAlignment="Right" Margin="0,2,0,10"/>
+
+                    <TextBlock Text="Мережа (Network):" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,4"/>
+                    <Border CornerRadius="5" ClipToBounds="True" Height="10" Background="#313244">
+                        <ProgressBar x:Name="NetProgressBar" Maximum="100" Value="0" Foreground="#CBA6F7" Background="Transparent" BorderThickness="0"/>
+                    </Border>
+                    <TextBlock x:Name="NetText" Text="0.0 Мбіт/с" Foreground="#BAC2DE" FontSize="12" TextAlignment="Right" Margin="0,2,0,15"/>
+
+                    <Border Background="#313244" CornerRadius="12" Padding="12">
+                        <StackPanel>
+                            <TextBlock Text="AI Двигун:" Foreground="#A6ADC8" FontSize="12"/>
+                            <TextBlock x:Name="AiStatusText" Text="Очікування..." Foreground="#89B4FA" FontSize="14" FontWeight="Bold" Margin="0,4,0,10" TextWrapping="Wrap"/>
+                            <CheckBox x:Name="NetworkToggle" Content="Режим Ollama" FontSize="12" Style="{StaticResource ToggleSwitchStyle}" Checked="NetworkToggle_Changed" Unchecked="NetworkToggle_Changed"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <Button x:Name="SettingsButton" Grid.Row="2" Style="{StaticResource SidebarButtonStyle}" HorizontalContentAlignment="Stretch" Margin="10,0,10,15" Height="40" Padding="0" Click="SettingsButton_Click">
+                    <StackPanel Orientation="Horizontal">
+                        <Grid Width="40">
+                            <Path Width="18" Height="18" Fill="#A6ADC8" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" Data="M19.4 13L19.4 13C19.4 12.6 19.4 12.2 19.4 11.8L21.5 10.2C21.7 10 21.8 9.7 21.6 9.5L19.6 6C19.5 5.8 19.2 5.7 19 5.8L16.5 6.8C16 6.4 15.4 6.1 14.8 5.8L14.4 3.2C14.4 2.9 14.1 2.7 13.9 2.7H9.9C9.6 2.7 9.4 2.9 9.3 3.2L8.9 5.8C8.3 6.1 7.8 6.4 7.2 6.8L4.8 5.8C4.5 5.7 4.2 5.8 4.1 6L2.1 9.5C2 9.7 2 10 2.2 10.2L4.3 11.8C4.3 12.2 4.3 12.6 4.3 13L2.2 14.6C2 14.8 1.9 15.1 2.1 15.3L4.1 18.8C4.2 19 4.5 19.1 4.7 19L7.2 18C7.7 18.4 8.3 18.7 8.9 19L9.3 21.6C9.3 21.9 9.6 22.1 9.9 22.1H13.9C14.2 22.1 14.4 21.9 14.5 21.6L14.9 19C15.5 18.7 16 18.4 16.6 18L19 19C19.3 19.1 19.6 19 19.7 18.8L21.7 15.3C21.8 15.1 21.8 14.8 21.6 14.6L19.4 13ZM11.8 15.5C9.9 15.5 8.3 13.9 8.3 12C8.3 10.1 9.9 8.5 11.8 8.5C13.7 8.5 15.3 10.1 15.3 12C15.3 13.9 13.7 15.5 11.8 15.5Z"/>
+                        </Grid>
+                        <TextBlock x:Name="SettingsText" Text="Налаштування" Foreground="#BAC2DE" FontSize="14" FontWeight="Medium" VerticalAlignment="Center" Margin="5,0,0,0"/>
+                    </StackPanel>
+                </Button>
+
+                <Popup x:Name="SettingsPopup" PlacementTarget="{Binding ElementName=SettingsButton}" Placement="Top" HorizontalOffset="-10" VerticalOffset="45" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Slide">
+                    <Border Background="#1E1E2E" BorderBrush="#313244" BorderThickness="1" CornerRadius="16" Padding="20" Width="300" Margin="10">
+                        <Border.Effect>
+                            <DropShadowEffect Color="Black" Opacity="0.4" BlurRadius="15" ShadowDepth="3"/>
+                        </Border.Effect>
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,15">
+                                <Path Width="18" Height="18" Fill="#CBA6F7" Stretch="Uniform" VerticalAlignment="Center" Data="M19.4 13L19.4 13C19.4 12.6 19.4 12.2 19.4 11.8L21.5 10.2C21.7 10 21.8 9.7 21.6 9.5L19.6 6C19.5 5.8 19.2 5.7 19 5.8L16.5 6.8C16 6.4 15.4 6.1 14.8 5.8L14.4 3.2C14.4 2.9 14.1 2.7 13.9 2.7H9.9C9.6 2.7 9.4 2.9 9.3 3.2L8.9 5.8C8.3 6.1 7.8 6.4 7.2 6.8L4.8 5.8C4.5 5.7 4.2 5.8 4.1 6L2.1 9.5C2 9.7 2 10 2.2 10.2L4.3 11.8C4.3 12.2 4.3 12.6 4.3 13L2.2 14.6C2 14.8 1.9 15.1 2.1 15.3L4.1 18.8C4.2 19 4.5 19.1 4.7 19L7.2 18C7.7 18.4 8.3 18.7 8.9 19L9.3 21.6C9.3 21.9 9.6 22.1 9.9 22.1H13.9C14.2 22.1 14.4 21.9 14.5 21.6L14.9 19C15.5 18.7 16 18.4 16.6 18L19 19C19.3 19.1 19.6 19 19.7 18.8L21.7 15.3C21.8 15.1 21.8 14.8 21.6 14.6L19.4 13ZM11.8 15.5C9.9 15.5 8.3 13.9 8.3 12C8.3 10.1 9.9 8.5 11.8 8.5C13.7 8.5 15.3 10.1 15.3 12C15.3 13.9 13.7 15.5 11.8 15.5Z"/>
+                                <TextBlock Text="Налаштування" Foreground="#CBA6F7" FontSize="16" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <TextBlock Text="Ключ API (Groq):" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,5"/>
+                            <TextBox x:Name="ApiKeyBox" Height="38" Background="#313244" Foreground="#CDD6F4" BorderThickness="1" BorderBrush="#45475A" Padding="10,0" VerticalContentAlignment="Center" FontSize="13">
+                                <TextBox.Resources>
+                                    <Style TargetType="Border">
+                                        <Setter Property="CornerRadius" Value="8"/>
+                                    </Style>
+                                </TextBox.Resources>
+                            </TextBox>
+                            <TextBlock Text="*Залиште порожнім для використання лише локальної мережі (Ollama)" Foreground="#6C7086" FontSize="11" Margin="0,8,0,20" TextWrapping="Wrap"/>
+                            <Button Content="Зберегти" Height="38" Background="#A6E3A1" Foreground="#1E1E2E" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Click="SaveSettings_Click">
+                                <Button.Resources>
+                                    <Style TargetType="Border">
+                                        <Setter Property="CornerRadius" Value="10"/>
+                                    </Style>
+                                </Button.Resources>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </Popup>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Column="1" Margin="20,15,20,20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Margin="0,0,0,15">
+                <TextBlock Text="Інтелектуальна система моніторингу та керування апаратними ресурсами ПК" 
+                           Foreground="#6C7086" FontSize="13" VerticalAlignment="Center" HorizontalAlignment="Center" FontWeight="SemiBold"/>
+            </Grid>
+
+            <ScrollViewer x:Name="ChatScrollViewer" Grid.Row="1" Margin="0,0,0,15" VerticalScrollBarVisibility="Auto" Padding="0,0,15,0">
+                <StackPanel x:Name="ChatPanel" VerticalAlignment="Bottom"/>
+            </ScrollViewer>
+
+            <Border x:Name="NotificationBadge" Grid.Row="1" Background="#A6E3A1" CornerRadius="16" Padding="20,10" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,20" Opacity="0" IsHitTestVisible="False">
+                <TextBlock x:Name="NotificationText" Text="Скопійовано!" Foreground="#1E1E2E" FontWeight="Bold" FontSize="13"/>
+            </Border>
+
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Background="#313244" CornerRadius="12" Height="45">
+                    <Grid>
+                        <TextBlock Text="Спитати TechBro..." Foreground="#6C7086" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="15,0,0,0" IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Hidden"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=UserInputBox}" Value="">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <TextBox x:Name="UserInputBox" Background="Transparent" Foreground="#CDD6F4" FontSize="14" BorderThickness="0" Padding="15,0,15,0" VerticalContentAlignment="Center" CaretBrush="#CDD6F4" KeyDown="UserInputBox_KeyDown">
+                            <TextBox.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Command="ApplicationCommands.Cut" Header="Вирізати"/>
+                                    <MenuItem Command="ApplicationCommands.Copy" Header="Копіювати"/>
+                                    <MenuItem Command="ApplicationCommands.Paste" Header="Вставити"/>
+                                </ContextMenu>
+                            </TextBox.ContextMenu>
+                        </TextBox>
+                    </Grid>
+                </Border>
+
+                <Button x:Name="SendButton" Grid.Column="1" Width="50" Height="45" Margin="10,0,0,0" Background="#89B4FA" Foreground="#1E1E2E" BorderThickness="0" Cursor="Hand" Click="SendButton_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="12"/>
+                        </Style>
+                    </Button.Resources>
+                    <Path Width="18" Height="18" Fill="#1E1E2E" Stretch="Uniform" Data="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" Margin="3,0,0,0"/>
+                </Button>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>
