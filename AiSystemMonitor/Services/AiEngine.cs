@@ -8,7 +8,7 @@ using Microsoft.SemanticKernel.Connectors.Ollama;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
 using AiSystemMonitor.Plugins;
 
-namespace AiSystemMonitor.Core
+namespace AiSystemMonitor.Services
 {
     public class AiResponse
     {
@@ -64,9 +64,11 @@ namespace AiSystemMonitor.Core
             var builder = Kernel.CreateBuilder();
             if (useLocal)
             {
-                CurrentModelName = "qwen3:8b";
+                // Беремо назву з констант
+                CurrentModelName = Constants.LocalModelName;
+
                 builder.AddOllamaChatCompletion(modelId: CurrentModelName, endpoint: new Uri("http://localhost:11434"));
-                _settings = new OllamaPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(autoInvoke: false), Temperature = 0.2f,};
+                _settings = new OllamaPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(autoInvoke: false), Temperature = 0.2f, };
             }
             else
             {
@@ -77,7 +79,8 @@ namespace AiSystemMonitor.Core
 
                 if (apiKey.StartsWith("AIza"))
                 {
-                    CurrentModelName = "gemini-3.1-flash-lite";
+                    // Беремо назву з констант
+                    CurrentModelName = Constants.GoogleModelName;
 
                     var googleHttpClient = new HttpClient
                     {
@@ -93,14 +96,18 @@ namespace AiSystemMonitor.Core
                 }
                 else if (apiKey.StartsWith("gsk_")) // GROQ
                 {
-                    CurrentModelName = "llama-3.3-70b-versatile";
+                    // Беремо назву з констант
+                    CurrentModelName = Constants.GroqModelName;
+
                     var groqHttpClient = new HttpClient { BaseAddress = new Uri("https://api.groq.com/openai/v1/") };
                     builder.AddOpenAIChatCompletion(modelId: CurrentModelName, apiKey: apiKey, httpClient: groqHttpClient);
                 }
                 else if (apiKey.StartsWith("sk-")) // OPENAI (ChatGPT)
                 {
-                    CurrentModelName = "gpt-4o-mini";
-                    builder.AddOpenAIChatCompletion(modelId: CurrentModelName, apiKey: apiKey); // Для OpenAI не потрібен кастомний HttpClient
+                    // Беремо назву з констант
+                    CurrentModelName = Constants.OpenAiModelName;
+
+                    builder.AddOpenAIChatCompletion(modelId: CurrentModelName, apiKey: apiKey);
                 }
                 else
                 {

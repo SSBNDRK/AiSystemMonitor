@@ -1,5 +1,4 @@
-﻿using AiSystemMonitor.Core;
-using AiSystemMonitor.Services;
+﻿using AiSystemMonitor.Services;
 using System.Windows;
 using System.Windows.Threading;
 

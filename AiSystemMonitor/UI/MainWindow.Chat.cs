@@ -1,4 +1,4 @@
-﻿using AiSystemMonitor.Core;
+﻿using AiSystemMonitor.Services;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
