@@ -6,7 +6,7 @@ using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.Ollama;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
-using AiSystemMonitor.Plugins; // Підключаємо нашу папку з плагінами
+using AiSystemMonitor.Plugins;
 
 namespace AiSystemMonitor.Core
 {
@@ -27,21 +27,41 @@ namespace AiSystemMonitor.Core
 
         public AiEngine()
         {
-            // НОВИЙ AGENTIC ПРОМТ: Мінімум шаблонів, максимум аналітики
-            string prompt = @"Ти — TechBro, ШІ-асистент з моніторингу ПК та системний аналітик.
-            Спілкуєшся українською, лаконічно, але як жива людина (бро-стиль). ЖОДНОГО виділення жирним (**).
+            // ЗОЛОТИЙ ПРОМТ ДЛЯ ПОТУЖНИХ МОДЕЛЕЙ (Без C#-перехоплювачів)
+            string prompt = @"Ти — TechBro, AI-асистент для моніторингу ПК.
 
-            ТВІЙ АЛГОРИТМ РОБОТИ (ГІБРИДНИЙ ПІДХІД):
-            1. ВИБІР ІНСТРУМЕНТУ: Якщо тебе питають про стан системи (процеси, диски, характеристики, пінг, швидкість) — ТИ ЗОБОВ'ЯЗАНИЙ спочатку викликати відповідний інструмент. НІКОЛИ не вигадуй цифри.
-            2. АНАЛІЗ: Отримавши дані від інструменту, не просто виведи їх, а ПРОАНАЛІЗУЙ. (Наприклад: якщо швидкість диска 800 МБ/с - скажи, що це швидкий SSD; якщо Хром бере 2ГБ - поясни, що це через вкладки).
-            3. ВЛАСНІ ЗНАННЯ: Якщо тебе просять пояснити, що робить процес (наприклад, 'що таке explorer') — не викликай інструменти. Просто поясни це своїми словами, опираючись на свої знання ОС Windows.
-            4. ОБМЕЖЕННЯ: Говоримо тільки про ПК та IT. На питання про погоду, кулінарію чи фікуси жартівливо відповідай: 'Бро, я по залізу, а не по [те про що питали]'.
+Відповідай українською.
+Стиль: коротко, природньо, без markdown.
 
-            ФОРМАТУВАННЯ:
-            - Назви процесів та заліза залишай англійською.
-            - Списки завжди виводь через дефіс (-). Жодних зірочок.
-            - Якщо виводиш топ процесів — завжди нумеруй їх (1., 2., 3.).
-            - Забудь про жорсткі шаблони. Кожна твоя відповідь має бути унікальною.";
+Ти НЕ маєш доступу до системних даних напряму.
+Для:
+- температур
+- процесів
+- GPU
+- CPU
+- RAM
+- дисків
+- ping
+- характеристик ПК
+
+ТИ ЗОБОВ'ЯЗАНИЙ викликати tool.
+
+Не вигадуй системні дані.
+
+Якщо потрібен tool:
+- не пиши текст
+- просто викликай tool
+
+Після tool:
+- коротко проаналізуй результат
+- 1-2 речення максимум
+
+Для process kill:
+1. RequestProcessKill
+2. чекати підтвердження
+3. ConfirmProcessKill лише після 'так'
+
+Працюєш лише з темами ПК та IT.";
 
             _history = new ChatHistory(prompt);
         }
@@ -62,16 +82,50 @@ namespace AiSystemMonitor.Core
             var builder = Kernel.CreateBuilder();
             if (useLocal)
             {
-                CurrentModelName = "llama3.1:latest";
+                CurrentModelName = "qwen3:8b";
                 builder.AddOllamaChatCompletion(modelId: CurrentModelName, endpoint: new Uri("http://localhost:11434"));
-                _settings = new OllamaPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(), Temperature = 0.3f }; // Трохи підняли температуру для креативності
+                _settings = new OllamaPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Required(), Temperature = 0.2f };
             }
             else
             {
-                CurrentModelName = "llama-3.3-70b-versatile";
-                var groqHttpClient = new HttpClient { BaseAddress = new Uri("https://api.groq.com/openai/v1/") };
-                builder.AddOpenAIChatCompletion(modelId: CurrentModelName, apiKey: apiKey, httpClient: groqHttpClient);
-                _settings = new OpenAIPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(), Temperature = 0.4 };
+                if (string.IsNullOrWhiteSpace(apiKey))
+                {
+                    throw new Exception("Бро, API ключ не може бути порожнім!");
+                }
+
+                if (apiKey.StartsWith("AIza"))
+                {
+                    CurrentModelName = "gemini-3.1-flash-lite";
+
+                    var googleHttpClient = new HttpClient
+                    {
+                        BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/openai/"),
+                        Timeout = TimeSpan.FromSeconds(30)
+                    };
+
+                    builder.AddOpenAIChatCompletion(
+                        modelId: CurrentModelName,
+                        apiKey: apiKey,
+                        httpClient: googleHttpClient
+                    );
+                }
+                else if (apiKey.StartsWith("gsk_")) // GROQ
+                {
+                    CurrentModelName = "llama-3.3-70b-versatile";
+                    var groqHttpClient = new HttpClient { BaseAddress = new Uri("https://api.groq.com/openai/v1/") };
+                    builder.AddOpenAIChatCompletion(modelId: CurrentModelName, apiKey: apiKey, httpClient: groqHttpClient);
+                }
+                else if (apiKey.StartsWith("sk-")) // OPENAI (ChatGPT)
+                {
+                    CurrentModelName = "gpt-4o-mini";
+                    builder.AddOpenAIChatCompletion(modelId: CurrentModelName, apiKey: apiKey); // Для OpenAI не потрібен кастомний HttpClient
+                }
+                else
+                {
+                    throw new Exception("Невідомий формат ключа! Підтримуються формати: Google (AIza...), Groq (gsk_...) або OpenAI (sk-...).");
+                }
+
+                _settings = new OpenAIPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(), Temperature = 0.3 };
             }
 
             builder.Plugins.AddFromType<HardwarePlugin>();
@@ -82,27 +136,25 @@ namespace AiSystemMonitor.Core
         public async Task<AiResponse> ProcessMessageAsync(string userInput)
         {
             var response = new AiResponse { IsError = false };
-            string lowerInput = userInput.ToLower().Trim();
-
             _history.AddUserMessage(userInput);
 
-            // GUARDRAIL 1: Швидке привітання (щоб не ганяти ШІ дарма)
-            if (lowerInput == "привіт" || lowerInput == "привіт!" || lowerInput.Contains("як справи") || lowerInput == "дарова")
-            {
-                string greetingReply = "Привіт, бро! Системи в нормі. Що перевіримо: диски, процеси чи мережу?";
-                _history.AddAssistantMessage(greetingReply);
-                response.Text = greetingReply;
-                return response;
-            }
+            // КОНТРОЛЬ ПАМ'ЯТІ (SLIDING WINDOW)
+            int maxHistorySize = 7;
 
-            if (_history.Count > 20) _history.RemoveRange(1, 10);
+            if (_history.Count > maxHistorySize)
+            {
+                // Вираховуємо, скільки зайвого накопичилося
+                int itemsToRemove = _history.Count - maxHistorySize;
+
+                // Видаляємо старі повідомлення, починаючи з індексу 1 (щоб НІКОЛИ не видалити системний промт на індексі 0)
+                _history.RemoveRange(1, itemsToRemove);
+            }
 
             try
             {
-                // КРОК 1: LLM визначає намір (Intent) і каже, які інструменти потрібні
                 var result = await _chat.GetChatMessageContentAsync(_history, _settings, _kernel);
 
-                // КРОК 2: C# безпечно виконує ці інструменти
+                // Класичний цикл виклику інструментів (без перехоплювачів)
                 while (result.Items.Any(i => i is FunctionCallContent))
                 {
                     _history.Add(result);
@@ -124,24 +176,17 @@ namespace AiSystemMonitor.Core
                         }
                         catch (Exception ex) { functionResult = $"Error: {ex.Message}"; }
 
-                        // Додаємо СИРІ ДАНІ в історію
                         var toolMessage = new ChatMessageContent(AuthorRole.Tool, content: functionResult);
                         toolMessage.Items.Add(new FunctionResultContent(item, functionResult));
                         _history.Add(toolMessage);
                     }
 
-                    // КРОК 3: LLM отримує сирі дані, аналізує їх і генерує фінальний текст "від себе"
                     result = await _chat.GetChatMessageContentAsync(_history, _settings, _kernel);
                 }
 
-                // Витягуємо фінальний текст від нейромережі
                 string finalOutput = result.Content?.Trim() ?? "Збій генерації відповіді.";
-
-                // Мінімальна косметика (видаляємо markdown-артефакти)
                 finalOutput = finalOutput.Replace("```json", "").Replace("```", "").Trim();
-                finalOutput = finalOutput.Replace("**", "");
 
-                // Якщо локальна модель збожеволіла і видала JSON замість тексту
                 if (finalOutput.Contains("\"name\": \"HardwarePlugin_") || finalOutput.Contains("\"parameters\":"))
                 {
                     finalOutput = "Бро, я трохи заплутався в системних даних. Спробуй перефразувати запит!";
@@ -158,18 +203,6 @@ namespace AiSystemMonitor.Core
                 if (ex.Message.Contains("429") || ex.Message.Contains("rate_limit"))
                 {
                     errMsg = "Я зараз трохи перевантажений запитами. Почекай 10 секунд!";
-                }
-                // GUARDRAIL 2: Порятунок від багів хмарного Groq API
-                else if (ex.Message.Contains("tool_use_failed") && ex.Message.Contains("HardwarePlugin_"))
-                {
-                    var plugin = new HardwarePlugin();
-                    if (ex.Message.Contains("GetCpuSensors")) errMsg = "Датчики ЦП та Материнки:\n" + plugin.GetCpuSensors();
-                    else if (ex.Message.Contains("GetGpuSensors")) errMsg = "Датчики відеокарти:\n" + plugin.GetGpuSensors();
-                    else if (ex.Message.Contains("GetSystemSpecs")) errMsg = "Характеристики:\n" + plugin.GetSystemSpecs();
-                    else if (ex.Message.Contains("GetAllDisksInfo")) errMsg = "Ось твої диски:\n" + plugin.GetAllDisksInfo();
-                    else errMsg = "Бро, хмарний API тимчасово глючить. Спробуй локальну мережу!";
-
-                    _history.AddAssistantMessage(errMsg);
                 }
                 else
                 {

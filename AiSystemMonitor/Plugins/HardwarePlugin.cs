@@ -174,39 +174,6 @@ namespace AiSystemMonitor.Plugins
             return string.Join("\n", lines);
         }
 
-        [KernelFunction, Description("Kills a running process. CRITICAL: ONLY use this tool if the user EXPLICITLY commands you to close it (e.g., 'закрий chrome').")]
-        public string KillProcess([Description("The exact name of the process, e.g., 'chrome' or 'telegram'")] string processName)
-        {
-            // 1. Захист від дурня: якщо ШІ випадково додав ".exe", відрізаємо його
-            string cleanName = processName.ToLower().Replace(".exe", "").Trim();
-
-            // 2. Розширений чорний список критичних процесів Windows
-            string[] protectedProcesses = {
-                "explorer", "ollama", "aisystemagent", "svchost", "wininit",
-                "services", "dwm", "csrss", "lsass", "smss", "taskmgr", "system"
-            };
-
-            if (protectedProcesses.Contains(cleanName))
-            {
-                return $"Помилка: '{cleanName}' — це критичний системний процес. Я не можу його закрити задля безпеки ПК.";
-            }
-
-            try
-            {
-                // Використовуємо очищене ім'я
-                var targets = Process.GetProcessesByName(cleanName);
-                if (targets.Length == 0) return $"Помилка: Програма '{cleanName}' не запущена або такий процес не знайдено.";
-
-                foreach (var p in targets) p.Kill();
-
-                return $"Успіх: Процес {cleanName} успішно закрито.";
-            }
-            catch (Exception ex)
-            {
-                return $"Помилка при закритті: {ex.Message}";
-            }
-        }
-
         [KernelFunction, Description("Gets the name and current status of the GPU (Video Card).")]
         public string GetGpuStatus()
         {
@@ -328,6 +295,61 @@ namespace AiSystemMonitor.Plugins
             return GetSensorsByType(HardwareType.GpuNvidia, HardwareType.GpuAmd);
         }
 
+        [KernelFunction, Description("Перший етап закриття процесу: перевірка безпеки та розрахунок пам'яті. НІКОЛИ не закриває процес одразу.")]
+        public string RequestProcessKill(
+        [Description("Назва процесу (наприклад, chrome, discord)")] string processName)
+        {
+            try
+            {
+                // Список недоторканних процесів
+                string[] systemProcesses = { "explorer", "svchost", "winlogon", "services", "system", "idle", "devenv" };
+
+                if (systemProcesses.Contains(processName.ToLower()))
+                {
+                    return $"CRITICAL_ERROR|Бро, {processName} — це системний процес. Якщо я його закрию, твій ПК просто ляже. Я не буду цього робити.";
+                }
+
+                var processes = Process.GetProcessesByName(processName);
+                if (processes.Length == 0)
+                    return $"NOT_FOUND|Процес {processName} не знайдено серед запущених.";
+
+                long totalMemory = 0;
+                foreach (var p in processes)
+                {
+                    try { totalMemory += p.WorkingSet64; } catch { }
+                }
+
+                double memoryMb = totalMemory / 1024.0 / 1024.0;
+
+                // Повертаємо спеціальний маркер для нашого AiEngine
+                return $"APPROVE_REQUIRED|{processName}|{memoryMb:F0}";
+            }
+            catch (Exception ex)
+            {
+                return $"ERROR|Помилка при підготовці: {ex.Message}";
+            }
+        }
+
+        [KernelFunction, Description("Другий етап закриття процесу: Остаточне закриття процесу. Викликається ТІЛЬКИ після явного 'Так' від користувача.")]
+        public string ConfirmProcessKill(
+            [Description("Назва процесу для закриття")] string processName)
+        {
+            try
+            {
+                var processes = Process.GetProcessesByName(processName);
+                int count = processes.Length;
+                foreach (var p in processes)
+                {
+                    p.Kill();
+                }
+                return $"SUCCESS|Я успішно закрив {count} процес(ів) {processName}. Тепер твоєму ПК дихається легше!";
+            }
+            catch (Exception ex)
+            {
+                return $"ERROR|Не вдалося завершити дію: {ex.Message}";
+            }
+        }
+
         // Приватний хелпер, щоб не дублювати код
         private string GetSensorsByType(params HardwareType[] targetTypes)
         {
@@ -356,6 +378,5 @@ namespace AiSystemMonitor.Plugins
             }
             catch (Exception ex) { return $"Помилка датчиків: {ex.Message}"; }
         }
-
     }
 }
