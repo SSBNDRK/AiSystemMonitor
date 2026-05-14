@@ -27,41 +27,25 @@ namespace AiSystemMonitor.Core
 
         public AiEngine()
         {
-            // ЗОЛОТИЙ ПРОМТ ДЛЯ ПОТУЖНИХ МОДЕЛЕЙ (Без C#-перехоплювачів)
-            string prompt = @"Ти — TechBro, AI-асистент для моніторингу ПК.
+            string prompt = @"Ти — TechBro, AI-асистент для ПК.
+            Відповідай українською.
+            Стиль: бро, коротко, природньо. ЖОДНОГО виділення тексту зірочками (**).
 
-Відповідай українською.
-Стиль: коротко, природньо, без markdown.
+            АЛГОРИТМ:
+            1. ДЛЯ ДАНИХ (температури, процеси, ОЗП, диски, пінг, характеристики): ЗАВЖДИ мовчки викликай tool.
+            2. ДЛЯ ТЕОРІЇ (що таке програма/процес): використовуй власні знання, НЕ викликай tool.
+            3. ОБМЕЖЕННЯ: Лише теми ПК. Жодної кулінарії чи погоди.
 
-Ти НЕ маєш доступу до системних даних напряму.
-Для:
-- температур
-- процесів
-- GPU
-- CPU
-- RAM
-- дисків
-- ping
-- характеристик ПК
+            БАЗА ЗНАНЬ (Аналізуй цифри від tools):
+            - Пінг: <40мс (ідеально), >100мс (погано).
+            - Диск: >400 МБ/с (швидкий SSD).
+            - ОЗП: Chrome та devenv жеруть багато, це норма.
 
-ТИ ЗОБОВ'ЯЗАНИЙ викликати tool.
-
-Не вигадуй системні дані.
-
-Якщо потрібен tool:
-- не пиши текст
-- просто викликай tool
-
-Після tool:
-- коротко проаналізуй результат
-- 1-2 речення максимум
-
-Для process kill:
-1. RequestProcessKill
-2. чекати підтвердження
-3. ConfirmProcessKill лише після 'так'
-
-Працюєш лише з темами ПК та IT.";
+            ЗАКРИТТЯ ПРОЦЕСІВ (Сувора черга):
+            1. Виклич RequestProcessKill.
+            2. Запитай у юзера підтвердження.
+            3. ТІЛЬКИ ПІСЛЯ слова 'так' виклич ConfirmProcessKill.
+            НІКОЛИ не пиши 'процес закрито', поки не отримаєш SUCCESS від інструменту.";
 
             _history = new ChatHistory(prompt);
         }
@@ -84,7 +68,7 @@ namespace AiSystemMonitor.Core
             {
                 CurrentModelName = "qwen3:8b";
                 builder.AddOllamaChatCompletion(modelId: CurrentModelName, endpoint: new Uri("http://localhost:11434"));
-                _settings = new OllamaPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Required(), Temperature = 0.2f };
+                _settings = new OllamaPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(), Temperature = 0.2f };
             }
             else
             {
@@ -186,6 +170,7 @@ namespace AiSystemMonitor.Core
 
                 string finalOutput = result.Content?.Trim() ?? "Збій генерації відповіді.";
                 finalOutput = finalOutput.Replace("```json", "").Replace("```", "").Trim();
+                finalOutput = finalOutput.Replace("**", "");
 
                 if (finalOutput.Contains("\"name\": \"HardwarePlugin_") || finalOutput.Contains("\"parameters\":"))
                 {

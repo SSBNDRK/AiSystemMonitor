@@ -231,7 +231,7 @@
                                 <TextBlock Text="Налаштування" Foreground="#CBA6F7" FontSize="16" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center"/>
                             </StackPanel>
 
-                            <TextBlock Text="Ключ API (Groq):" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,5"/>
+                            <TextBlock Text="Хмарний API Ключ (Gemini / Groq / OpenAI):" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,5"/>
                             <TextBox x:Name="ApiKeyBox" Height="38" Background="#313244" Foreground="#CDD6F4" BorderThickness="1" BorderBrush="#45475A" Padding="10,0" VerticalContentAlignment="Center" FontSize="13">
                                 <TextBox.Resources>
                                     <Style TargetType="Border">
