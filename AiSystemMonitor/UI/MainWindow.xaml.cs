@@ -16,6 +16,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace AiSystemMonitor
@@ -42,7 +43,7 @@ namespace AiSystemMonitor
         private async void InitializeAppAsync()
         {
             _aiEngine = new AiEngine(); // Ініціалізуємо ядро
-            AddMessageToChat("TechBro", "Я TechBro. Аналізую систему та перевіряю мережу...", "#CBA6F7", false);
+            AddMessageToChat("TechBro", "Я TechBro. Аналізую систему та перевіряю мережу...", isInteractive: false);
 
             _sysMonitor = new SystemMonitor();
             _sysMonitor.OnStatsUpdated += (s, args) =>
@@ -104,7 +105,7 @@ namespace AiSystemMonitor
                     var oldError = ChatPanel.Children.OfType<StackPanel>().FirstOrDefault(p => p.Tag?.ToString() == "OllamaError");
                     if (oldError != null) ChatPanel.Children.Remove(oldError);
 
-                    AddMessageToChat("Система", "⚠️ Локальна мережа Ollama не запущена! Будь ласка, увімкніть Ollama на вашому ПК перед перемиканням.", "#F38BA8");
+                    AddMessageToChat("Система", "⚠️ Локальна мережа Ollama не запущена! Будь ласка, увімкніть Ollama на вашому ПК перед перемиканням.");
 
                     if (ChatPanel.Children.Count > 0 && ChatPanel.Children[ChatPanel.Children.Count - 1] is StackPanel lastPanel)
                         lastPanel.Tag = "OllamaError";
@@ -150,7 +151,7 @@ namespace AiSystemMonitor
             {
                 AiStatusText.Text = "Помилка двигуна!";
                 AiStatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F38BA8"));
-                AddMessageToChat("Система", $"Збій перемикання мережі: {ex.Message}", "#F38BA8");
+                AddMessageToChat("Система", $"Збій перемикання мережі: {ex.Message}");
             }
         }
         #endregion
@@ -170,49 +171,70 @@ namespace AiSystemMonitor
 
             UserInputBox.Text = string.Empty;
             _isAiThinking = true;
-            AddMessageToChat("Ти", userInput, "#89B4FA");
+
+            AddMessageToChat("Ти", userInput);
             ScrollToBottom();
 
-            var thinkingBlock = AddMessageToChat("TechBro", "Аналізую запит...", "#6C7086");
+            // 1. СТВОРЮЄМО ТИМЧАСОВИЙ БЛОК (без ховеру і кнопок: isInteractive = false)
+            var thinkingPanel = AddMessageToChat("TechBro", "Аналізую запит.", "#6C7086", false);
             ScrollToBottom();
 
-            // МАГІЯ ТУТ: Відправляємо запит до нашого двигуна і чекаємо відповідь
+            // Шукаємо текстовий блок всередині панелі, щоб міняти в ньому крапочки
+            var border = thinkingPanel.Children.OfType<Border>().FirstOrDefault();
+            var grid = border?.Child as Grid;
+            var thinkingTextBlock = grid?.Children.OfType<TextBlock>().FirstOrDefault();
+
+            // 2. ЗАПУСКАЄМО АНІМАЦІЮ КРАПОЧОК
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+            int dotCount = 1;
+            timer.Tick += (s, e) =>
+            {
+                if (thinkingTextBlock != null)
+                {
+                    dotCount = dotCount > 3 ? 1 : dotCount + 1;
+                    thinkingTextBlock.Text = "Аналізую запит" + new string('.', dotCount);
+                }
+            };
+            timer.Start();
+
+            // Чекаємо на відповідь від нейромережі
             AiResponse response = await _aiEngine.ProcessMessageAsync(userInput);
 
-            // Оновлюємо UI
-            thinkingBlock.Text = response.Text;
-            thinkingBlock.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(response.IsError ? "#F38BA8" : "#CDD6F4"));
+            // 3. ЗУПИНЯЄМО ТАЙМЕР І ВИДАЛЯЄМО ТИМЧАСОВИЙ БЛОК
+            timer.Stop();
+            ChatPanel.Children.Remove(thinkingPanel);
+
+            // 4. ДОДАЄМО ФІНАЛЬНУ ВІДПОВІДЬ (кнопки і ховер з'являться автоматично)
+            string finalColor = response.IsError ? "#F38BA8" : null;
+            AddMessageToChat("TechBro", response.Text, finalColor);
 
             _isAiThinking = false;
             ScrollToBottom();
         }
 
-        private TextBlock AddMessageToChat(string sender, string message, string hexColor, bool isDeletable = true)
+        private StackPanel AddMessageToChat(string sender, string message, string hexColor = null, bool isInteractive = true, bool isDeletable = true)
         {
             var messagePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 15) };
             var headerPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
 
-            // Формуємо ім'я з моделлю
             string displayName = sender == "TechBro" ? $"TechBro [{_aiEngine.CurrentModelName}]" : sender;
 
-            // Оригінальне ім'я відправника
             var senderText = new TextBlock
             {
-                Text = sender, // Просто 'TechBro' або 'Ти'
+                Text = sender,
                 FontWeight = FontWeights.Bold,
                 FontSize = 14,
                 Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(sender == "TechBro" ? "#CBA6F7" : "#89B4FA")),
             };
             headerPanel.Children.Add(senderText);
 
-            // Додаємо маленький бейдж моделі ТІЛЬКИ для бота
             if (sender == "TechBro")
             {
                 var modelBadge = new TextBlock
                 {
                     Text = $" [{_aiEngine.CurrentModelName}]",
-                    FontSize = 11, // Робимо дрібним
-                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6C7086")), // Приглушений сірий колір
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6C7086")),
                     VerticalAlignment = VerticalAlignment.Center,
                     Margin = new Thickness(4, 0, 0, 0)
                 };
@@ -226,10 +248,8 @@ namespace AiSystemMonitor
                 FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center
             };
-
             headerPanel.Children.Add(timeText);
 
-            // Визначаємо кольори фону: звичайний та при наведенні миші (трохи світліший)
             Brush normalBg = new SolidColorBrush((Color)ColorConverter.ConvertFromString(sender == "Ти" ? "#313244" : "#181825"));
             Brush hoverBg = new SolidColorBrush((Color)ColorConverter.ConvertFromString(sender == "Ти" ? "#45475A" : "#313244"));
 
@@ -240,20 +260,23 @@ namespace AiSystemMonitor
                 Padding = new Thickness(12)
             };
 
-            // Grid дозволяє накладати панель з кнопками поверх тексту
             var messageGrid = new Grid();
+
+            // Визначаємо колір тексту (якщо передали кастомний - юзаємо його)
+            Brush textBrush = hexColor != null
+                ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(hexColor))
+                : new SolidColorBrush((Color)ColorConverter.ConvertFromString(sender == "TechBro" ? "#BAC2DE" : "#CDD6F4"));
 
             var contentText = new TextBlock
             {
                 Text = message,
                 TextWrapping = TextWrapping.Wrap,
-                LineHeight = 22, // <--- Додав міжрядковий інтервал, щоб текст дихав
-                FontSize = 14, // <--- Жорстко задаємо 14px для повідомлень
-                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(sender == "TechBro" ? "#BAC2DE" : "#CDD6F4")),
+                LineHeight = 22,
+                FontSize = 14,
+                Foreground = textBrush,
                 Margin = new Thickness(0, 0, 45, 0)
             };
 
-            // --- ПАНЕЛЬ З МІНІ-ВІДЖЕТАМИ (за замовчуванням прихована) ---
             var actionControls = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -262,48 +285,57 @@ namespace AiSystemMonitor
                 Visibility = Visibility.Hidden
             };
 
-            // КНОПКИ З ВИКЛИКОМ СПОВІЩЕНЬ
-            var copyIcon = new TextBlock { Text = "📋", Margin = new Thickness(0, 0, 10, 0), Cursor = System.Windows.Input.Cursors.Hand, ToolTip = "Скопіювати текст" };
-            copyIcon.MouseLeftButtonDown += (s, e) =>
+            // ЯКЩО ПОВІДОМЛЕННЯ ІНТЕРАКТИВНЕ - ДОДАЄМО КНОПКИ ТА ХОВЕР
+            if (isInteractive)
             {
-                Clipboard.SetText(contentText.Text);
-                ShowNotification("Текст скопійовано в буфер! 📋"); // Викликаємо анімацію
-            };
-            actionControls.Children.Add(copyIcon); // Копіювати можна завжди
-
-            if (isDeletable)
-            {
-                var deleteIcon = new TextBlock { Text = "🗑️", Cursor = System.Windows.Input.Cursors.Hand, ToolTip = "Видалити повідомлення" };
-                deleteIcon.MouseLeftButtonDown += (s, e) =>
+                var copyIcon = new TextBlock { Text = "📋", Margin = new Thickness(0, 0, 10, 0), Cursor = System.Windows.Input.Cursors.Hand, ToolTip = "Скопіювати текст" };
+                copyIcon.MouseLeftButtonDown += (s, e) =>
                 {
-                    ChatPanel.Children.Remove(messagePanel);
-                    ShowNotification("Повідомлення успішно видалено 🗑️");
+                    Clipboard.SetText(contentText.Text);
+                    ShowNotification("Текст скопійовано в буфер! 📋");
                 };
-                actionControls.Children.Add(deleteIcon); // Додаємо кошик тільки якщо дозволено
+                actionControls.Children.Add(copyIcon);
+
+                if (isDeletable)
+                {
+                    var deleteIcon = new TextBlock { Text = "🗑️", Cursor = System.Windows.Input.Cursors.Hand, ToolTip = "Видалити повідомлення" };
+                    deleteIcon.MouseLeftButtonDown += (s, e) =>
+                    {
+                        ChatPanel.Children.Remove(messagePanel);
+                        ShowNotification("Повідомлення успішно видалено 🗑️");
+                    };
+                    actionControls.Children.Add(deleteIcon);
+                }
+
+                // Ховер ефект працює ТІЛЬКИ тут
+                messageBorder.MouseEnter += (s, e) =>
+                {
+                    messageBorder.Background = hoverBg;
+                    actionControls.Visibility = Visibility.Visible;
+                };
+                messageBorder.MouseLeave += (s, e) =>
+                {
+                    messageBorder.Background = normalBg;
+                    actionControls.Visibility = Visibility.Hidden;
+                };
+            }
+            else
+            {
+                // Для "думок" і системних текстів робимо похилий шрифт і без кнопок
+                contentText.FontStyle = FontStyles.Italic;
             }
 
             messageGrid.Children.Add(contentText);
             messageGrid.Children.Add(actionControls);
             messageBorder.Child = messageGrid;
 
-            // --- АНІМАЦІЯ ТА ПІДСВІТКА ПРИ НАВЕДЕННІ ---
-            messageBorder.MouseEnter += (s, e) =>
-            {
-                messageBorder.Background = hoverBg; // Робимо бульбашку світлішою
-                actionControls.Visibility = Visibility.Visible; // Показуємо віджети
-            };
-            messageBorder.MouseLeave += (s, e) =>
-            {
-                messageBorder.Background = normalBg; // Повертаємо старий фон
-                actionControls.Visibility = Visibility.Hidden; // Ховаємо віджети
-            };
-
             messagePanel.Children.Add(headerPanel);
             messagePanel.Children.Add(messageBorder);
             ChatPanel.Children.Add(messagePanel);
 
             ScrollToBottom();
-            return contentText;
+
+            return messagePanel; // Тепер ми повертаємо всю панель!
         }
 
         private void ScrollToBottom() => ChatScrollViewer.ScrollToEnd();
@@ -382,7 +414,7 @@ namespace AiSystemMonitor
             RebuildAiEngine(useLocalNetwork);
 
             // Замість білого системного вікна MessageBox, виводимо статус прямо в чат!
-            AddMessageToChat("Система", "✅ Налаштування успішно збережено. Двигун перезапущено.", "#A6E3A1");
+            AddMessageToChat("Система", "✅ Налаштування успішно збережено. Двигун перезапущено.");
         }
 
         private async void ShowNotification(string message)
