@@ -27,25 +27,23 @@ namespace AiSystemMonitor.Core
 
         public AiEngine()
         {
-            string prompt = @"Ти — TechBro, AI-асистент для ПК.
-            Відповідай українською.
-            Стиль: бро, коротко, природньо. ЖОДНОГО виділення тексту зірочками (**).
+            string prompt = @"[SYSTEM MODE: STRICT MONITORING]
+Ти — TechBro, інтелектуальний AI-помічник для ПК.
+Відповідай ВИКЛЮЧНО українською мовою.
 
-            АЛГОРИТМ:
-            1. ДЛЯ ДАНИХ (температури, процеси, ОЗП, диски, пінг, характеристики): ЗАВЖДИ мовчки викликай tool.
-            2. ДЛЯ ТЕОРІЇ (що таке програма/процес): використовуй власні знання, НЕ викликай tool.
-            3. ОБМЕЖЕННЯ: Лише теми ПК. Жодної кулінарії чи погоди.
+КРИТИЧНЕ ПРАВИЛО:
+Якщо користувач пише короткі команди , ти ПОВИНЕН діяти як бездумний термінал:
+1. Виклич відповідний інструмент (tool).
+2. Виведи отримані дані СЛОВО В СЛОВО у вигляді списку, наступні елементи з нового рядка.
+3. АБСОЛЮТНА ЗАБОРОНА: Тобі категорично заборонено аналізувати ці дані чи оцінювати.
 
-            БАЗА ЗНАНЬ (Аналізуй цифри від tools):
-            - Пінг: <40мс (ідеально), >100мс (погано).
-            - Диск: >400 МБ/с (швидкий SSD).
-            - ОЗП: Chrome та devenv жеруть багато, це норма.
+РЕЖИМ АНАЛІЗУ (ТІЛЬКИ ЗА ЗАПИТОМ):
+- Оцінюй залізо та давай поради ТІЛЬКИ якщо юзер прямо просить проаналізувати.
 
-            ЗАКРИТТЯ ПРОЦЕСІВ (Сувора черга):
-            1. Виклич RequestProcessKill.
-            2. Запитай у юзера підтвердження.
-            3. ТІЛЬКИ ПІСЛЯ слова 'так' виклич ConfirmProcessKill.
-            НІКОЛИ не пиши 'процес закрито', поки не отримаєш SUCCESS від інструменту.";
+ЗВИЧАЙНА РОЗМОВА:
+- Якщо тема не про PC, комплектуючі, IT — коротко відреагуй з гумором або емпатією (використовуючи ПК-сленг).
+- Жорсткий ліміт для звичайної розмови: 1-2 речення.
+";
 
             _history = new ChatHistory(prompt);
         }
@@ -68,7 +66,7 @@ namespace AiSystemMonitor.Core
             {
                 CurrentModelName = "qwen3:8b";
                 builder.AddOllamaChatCompletion(modelId: CurrentModelName, endpoint: new Uri("http://localhost:11434"));
-                _settings = new OllamaPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(), Temperature = 0.2f };
+                _settings = new OllamaPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(autoInvoke: false), Temperature = 0.2f,};
             }
             else
             {
@@ -109,7 +107,7 @@ namespace AiSystemMonitor.Core
                     throw new Exception("Невідомий формат ключа! Підтримуються формати: Google (AIza...), Groq (gsk_...) або OpenAI (sk-...).");
                 }
 
-                _settings = new OpenAIPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(), Temperature = 0.3 };
+                _settings = new OpenAIPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(), Temperature = 0.3, MaxTokens = 250 };
             }
 
             builder.Plugins.AddFromType<HardwarePlugin>();
@@ -122,53 +120,92 @@ namespace AiSystemMonitor.Core
             var response = new AiResponse { IsError = false };
             _history.AddUserMessage(userInput);
 
-            // КОНТРОЛЬ ПАМ'ЯТІ (SLIDING WINDOW)
-            int maxHistorySize = 7;
+            const int maxHistorySize = 12;
 
-            if (_history.Count > maxHistorySize)
+            while (_history.Count > maxHistorySize)
             {
-                // Вираховуємо, скільки зайвого накопичилося
-                int itemsToRemove = _history.Count - maxHistorySize;
+                _history.RemoveAt(1); // Видаляємо найстаріше повідомлення
 
-                // Видаляємо старі повідомлення, починаючи з індексу 1 (щоб НІКОЛИ не видалити системний промт на індексі 0)
-                _history.RemoveRange(1, itemsToRemove);
+                // Видаляємо всі наступні повідомлення, поки не натрапимо на новий запит від юзера.
+                // Це гарантує, що ми видаляємо "повні блоки" діалогу і не залишаємо "огризків" від Tools.
+                while (_history.Count > 1 && _history[1].Role != AuthorRole.User)
+                {
+                    _history.RemoveAt(1);
+                }
             }
 
             try
             {
                 var result = await _chat.GetChatMessageContentAsync(_history, _settings, _kernel);
 
-                // Класичний цикл виклику інструментів (без перехоплювачів)
-                while (result.Items.Any(i => i is FunctionCallContent))
+                int toolIterations = 0;
+                const int maxToolIterations = 3;
+
+                while (result.Items?.Any(i => i is FunctionCallContent) == true)
                 {
+                    toolIterations++;
+
+                    if (toolIterations >= maxToolIterations)
+                    {
+                        response.Text = "Бро, я завис на обробці системних даних.";
+                        response.IsError = true;
+                        return response;
+                    }
+
                     _history.Add(result);
+
                     foreach (var item in result.Items.OfType<FunctionCallContent>())
                     {
                         string functionResult = "Error: Tool execution failed.";
+
                         try
                         {
                             if (_kernel.Plugins.TryGetFunction("HardwarePlugin", item.FunctionName, out var function))
                             {
                                 var context = new KernelArguments();
+
                                 if (item.Arguments != null)
                                 {
-                                    foreach (var arg in item.Arguments) context[arg.Key] = arg.Value?.ToString();
+                                    foreach (var arg in item.Arguments)
+                                    {
+                                        context[arg.Key] = arg.Value?.ToString();
+                                    }
                                 }
+
                                 var res = await function.InvokeAsync(_kernel, context);
-                                functionResult = res.GetValue<string>() ?? "Success: Done.";
+
+                                functionResult = res.GetValue<string>() ?? "Success";
                             }
                         }
-                        catch (Exception ex) { functionResult = $"Error: {ex.Message}"; }
+                        catch (Exception ex)
+                        {
+                            functionResult = $"Error: {ex.Message}";
+                        }
 
-                        var toolMessage = new ChatMessageContent(AuthorRole.Tool, content: functionResult);
+                        var toolMessage = new ChatMessageContent(
+                            AuthorRole.Tool,
+                            content: functionResult
+                        );
+
                         toolMessage.Items.Add(new FunctionResultContent(item, functionResult));
+
                         _history.Add(toolMessage);
                     }
 
                     result = await _chat.GetChatMessageContentAsync(_history, _settings, _kernel);
                 }
 
-                string finalOutput = result.Content?.Trim() ?? "Збій генерації відповіді.";
+                string finalOutput = result.Content;
+
+                if (string.IsNullOrWhiteSpace(finalOutput))
+                {
+                    finalOutput = "Бро, модель не змогла нормально сформувати відповідь.";
+                }
+                else
+                {
+                    finalOutput = finalOutput.Trim();
+                }
+
                 finalOutput = finalOutput.Replace("```json", "").Replace("```", "").Trim();
                 finalOutput = finalOutput.Replace("**", "");
 
@@ -188,6 +225,10 @@ namespace AiSystemMonitor.Core
                 if (ex.Message.Contains("429") || ex.Message.Contains("rate_limit"))
                 {
                     errMsg = "Я зараз трохи перевантажений запитами. Почекай 10 секунд!";
+                }
+                else if (ex.Message.Contains("503") || ex.Message.Contains("Service Unavailable"))
+                {
+                    errMsg = "Хмарний сервер тимчасово недоступний (Помилка 503). Гугл трохи приліг, спробуй через пару хвилин або використовуй режим Ollama!";
                 }
                 else
                 {

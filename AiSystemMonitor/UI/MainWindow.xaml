@@ -281,7 +281,7 @@
 
                 <Border Grid.Column="0" Background="#313244" CornerRadius="12" Height="45">
                     <Grid>
-                        <TextBlock Text="Спитати TechBro..." Foreground="#6C7086" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="15,0,0,0" IsHitTestVisible="False">
+                        <TextBlock Text=" Спитати TechBro..." Foreground="#6C7086" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="15,0,0,0" IsHitTestVisible="False">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                     <Setter Property="Visibility" Value="Hidden"/>

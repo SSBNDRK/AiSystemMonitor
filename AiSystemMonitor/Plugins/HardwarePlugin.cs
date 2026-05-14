@@ -286,13 +286,72 @@ namespace AiSystemMonitor.Plugins
         [KernelFunction, Description("ВИКЛИКАЙ ЦЕ ТІЛЬКИ коли юзер питає про 'датчики', 'температуру' або 'навантаження процесора'. НЕ викликай для 'характеристик'.")]
         public string GetCpuSensors()
         {
-            return GetSensorsByType(HardwareType.Cpu, HardwareType.Motherboard, HardwareType.SuperIO);
+            var sb = new StringBuilder();
+            var computer = new Computer { IsCpuEnabled = true };
+            try
+            {
+                computer.Open();
+                foreach (var hardware in computer.Hardware)
+                {
+                    if (hardware.HardwareType == HardwareType.Cpu)
+                    {
+                        hardware.Update();
+                        sb.AppendLine($"[CPU: {hardware.Name}]");
+                        foreach (var sensor in hardware.Sensors)
+                        {
+                            if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue)
+                            {
+                                // Фільтруємо лише Core датчики, ігноруючи системне сміття
+                                if (sensor.Name.Contains("Core") || sensor.Name.Contains("Package") || sensor.Name.Contains("Tctl"))
+                                {
+                                    sb.AppendLine($"- Температура {sensor.Name}: {sensor.Value.Value:F1} °C");
+                                }
+                            }
+                            if (sensor.SensorType == SensorType.Load && sensor.Value.HasValue)
+                            {
+                                if (sensor.Name.Contains("Total"))
+                                {
+                                    sb.AppendLine($"- Загальне навантаження: {sensor.Value.Value:F1} %");
+                                }
+                            }
+                        }
+                    }
+                }
+                computer.Close();
+                string result = sb.ToString().Trim();
+                return string.IsNullOrEmpty(result) ? "Датчики CPU не знайдені." : result;
+            }
+            catch (Exception ex) { return $"Помилка датчиків CPU: {ex.Message}"; }
         }
 
         [KernelFunction, Description("Отримує датчики ТІЛЬКИ відеокарти (GPU): температуру, навантаження, вентилятори.")]
         public string GetGpuSensors()
         {
-            return GetSensorsByType(HardwareType.GpuNvidia, HardwareType.GpuAmd);
+            var sb = new StringBuilder();
+            var computer = new Computer { IsGpuEnabled = true };
+            try
+            {
+                computer.Open();
+                foreach (var hardware in computer.Hardware)
+                {
+                    if (hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuNvidia)
+                    {
+                        hardware.Update();
+                        sb.AppendLine($"[GPU: {hardware.Name}]");
+                        foreach (var sensor in hardware.Sensors)
+                        {
+                            if ((sensor.SensorType == SensorType.Temperature || sensor.SensorType == SensorType.Load || sensor.SensorType == SensorType.Fan) && sensor.Value.HasValue)
+                            {
+                                string unit = sensor.SensorType == SensorType.Temperature ? "°C" : (sensor.SensorType == SensorType.Load ? "%" : "RPM");
+                                sb.AppendLine($"- {sensor.Name}: {sensor.Value.Value:F1} {unit}");
+                            }
+                        }
+                    }
+                }
+                computer.Close();
+                return sb.ToString().Trim();
+            }
+            catch (Exception ex) { return $"Помилка датчиків GPU: {ex.Message}"; }
         }
 
         [KernelFunction, Description("Перший етап закриття процесу: перевірка безпеки та розрахунок пам'яті. НІКОЛИ не закриває процес одразу.")]
@@ -347,6 +406,75 @@ namespace AiSystemMonitor.Plugins
             catch (Exception ex)
             {
                 return $"ERROR|Не вдалося завершити дію: {ex.Message}";
+            }
+        }
+
+        private string _pendingPowerPlanGuid = null;
+        private string _pendingPowerPlanName = null;
+
+        [KernelFunction("GetPowerPlans")]
+        [Description("Отримує список усіх доступних схем живлення Windows. Активна схема позначена зірочкою (*).")]
+        public string GetPowerPlans()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("powercfg", "/list")
+                {
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                    // Рядок з кодуванням 866 видалено!
+                };
+                using var process = Process.Start(psi);
+                string output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit();
+
+                return output;
+            }
+            catch (Exception ex)
+            {
+                return $"Error: {ex.Message}";
+            }
+        }
+
+        [KernelFunction("RequestPowerPlanChange")]
+        [Description("Готує зміну схеми живлення. ВИКЛИКАТИ ПЕРЕД ConfirmPowerPlanChange.")]
+        public string RequestPowerPlanChange(
+            [Description("GUID схеми живлення (довгий код із літер та цифр)")] string guid,
+            [Description("Назва схеми для відображення")] string name)
+        {
+            _pendingPowerPlanGuid = guid;
+            _pendingPowerPlanName = name;
+            return $"SUCCESS: Ready to change to '{name}'. Запитай у юзера підтвердження ('так' чи 'ні').";
+        }
+
+        [KernelFunction("ConfirmPowerPlanChange")]
+        [Description("Остаточно змінює схему живлення. Викликати ТІЛЬКИ після слова 'так' від юзера.")]
+        public string ConfirmPowerPlanChange()
+        {
+            if (string.IsNullOrEmpty(_pendingPowerPlanGuid))
+                return "ERROR: Немає підготовленої схеми. Спочатку виклич RequestPowerPlanChange.";
+
+            try
+            {
+                var psi = new ProcessStartInfo("powercfg", $"/setactive {_pendingPowerPlanGuid}")
+                {
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var process = Process.Start(psi);
+                process.WaitForExit();
+
+                string name = _pendingPowerPlanName;
+                _pendingPowerPlanGuid = null; // Очищаємо пам'ять після успіху
+                _pendingPowerPlanName = null;
+
+                return $"SUCCESS: Схему живлення успішно змінено на {name}.";
+            }
+            catch (Exception ex)
+            {
+                return $"ERROR: {ex.Message}";
             }
         }
 

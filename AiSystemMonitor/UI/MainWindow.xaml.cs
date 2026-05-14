@@ -1,22 +1,8 @@
 ﻿using AiSystemMonitor.Core;
 using AiSystemMonitor.Services;
-using LibreHardwareMonitor.Hardware;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.Connectors.Ollama;
-using Microsoft.SemanticKernel.Connectors.OpenAI;
-using System;
-using System.Diagnostics;
-using System.Linq;
-using System.Management;
-using System.Net.Http;
-using System.Net.NetworkInformation;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace AiSystemMonitor
@@ -28,8 +14,10 @@ namespace AiSystemMonitor
         private bool _isSidebarCollapsed = false;
         private bool _isNetworkSwitching = false;
 
+        private FrameworkElement _lastSystemMessage = null;
+
         private SystemMonitor _sysMonitor;
-        private AiEngine _aiEngine; // <--- Підключили новий двигун!
+        private AiEngine _aiEngine;
         #endregion
 
         public MainWindow()
@@ -42,8 +30,8 @@ namespace AiSystemMonitor
 
         private async void InitializeAppAsync()
         {
-            _aiEngine = new AiEngine(); // Ініціалізуємо ядро
-            AddMessageToChat("TechBro", "Я TechBro. Аналізую систему та перевіряю мережу...", isInteractive: false);
+            _aiEngine = new AiEngine();
+            AddMessageToChat("TechBro", "Я TechBro. Аналізую систему та перевіряю мережу...");
 
             _sysMonitor = new SystemMonitor();
             _sysMonitor.OnStatsUpdated += (s, args) =>
@@ -105,7 +93,7 @@ namespace AiSystemMonitor
                     var oldError = ChatPanel.Children.OfType<StackPanel>().FirstOrDefault(p => p.Tag?.ToString() == "OllamaError");
                     if (oldError != null) ChatPanel.Children.Remove(oldError);
 
-                    AddMessageToChat("Система", "⚠️ Локальна мережа Ollama не запущена! Будь ласка, увімкніть Ollama на вашому ПК перед перемиканням.");
+                    AddMessageToChat("Система", "☁️ Важке завдання виконано хмарою. Повертаюсь в економний локальний режим...", "#A6ADC8", false);
 
                     if (ChatPanel.Children.Count > 0 && ChatPanel.Children[ChatPanel.Children.Count - 1] is StackPanel lastPanel)
                         lastPanel.Tag = "OllamaError";
@@ -172,7 +160,9 @@ namespace AiSystemMonitor
             UserInputBox.Text = string.Empty;
             _isAiThinking = true;
 
-            // ПРАПОРЕЦЬ: Чи використовували ми запасний план?
+            SendButton.IsEnabled = false;
+            SendButton.Opacity = 0.5;
+
             bool wasFallbackTriggered = false;
 
             AddMessageToChat("Ти", userInput);
@@ -245,19 +235,30 @@ namespace AiSystemMonitor
                 // Робимо мікро-паузу, щоб інтерфейс відмалював великий текст
                 await Task.Delay(1000);
 
-                // Виводимо системне повідомлення (без кнопок копіювання)
-                AddMessageToChat("Система", "☁️ Важке завдання виконано хмарою. Повертаюсь в економний локальний режим...", "#A6ADC8", false, false);
+                // Виводимо системне повідомлення
+                AddMessageToChat("Система", "☁️ Важке завдання виконано хмарою. Повертаюсь в економний локальний режим...", "#A6ADC8");
 
                 // Просто вмикаємо тумблер! Твій метод NetworkToggle_Changed зробить всю іншу магію сам!
                 NetworkToggle.IsChecked = true;
             }
 
             _isAiThinking = false;
+            SendButton.IsEnabled = true;
+            SendButton.Opacity = 1.0;
+            UserInputBox.Focus();
+
             ScrollToBottom();
         }
 
-        private StackPanel AddMessageToChat(string sender, string message, string hexColor = null, bool isInteractive = true, bool isDeletable = true)
+        private StackPanel AddMessageToChat(string sender, string message, string hexColor = null, bool isInteractive = true)
         {
+            // 1. АВТОВИДАЛЕННЯ: Якщо пише НЕ Система, прибираємо з екрану попереднє системне повідомлення
+            if (sender != "Система" && _lastSystemMessage != null)
+            {
+                ChatPanel.Children.Remove(_lastSystemMessage); // Виправлено на ChatPanel
+                _lastSystemMessage = null;
+            }
+
             var messagePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 15) };
             var headerPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
 
@@ -268,7 +269,9 @@ namespace AiSystemMonitor
                 Text = sender,
                 FontWeight = FontWeights.Bold,
                 FontSize = 14,
-                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(sender == "TechBro" ? "#CBA6F7" : "#89B4FA")),
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(
+                sender == "TechBro" ? "#CBA6F7" : (sender == "Система" ? "#A6ADC8" : "#89B4FA")
+            ))
             };
             headerPanel.Children.Add(senderText);
 
@@ -306,7 +309,7 @@ namespace AiSystemMonitor
 
             var messageGrid = new Grid();
 
-            // Визначаємо колір тексту (якщо передали кастомний - юзаємо його)
+            // Визначаємо колір тексту (параметр тепер hexColor)
             Brush textBrush = hexColor != null
                 ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(hexColor))
                 : new SolidColorBrush((Color)ColorConverter.ConvertFromString(sender == "TechBro" ? "#BAC2DE" : "#CDD6F4"));
@@ -340,18 +343,17 @@ namespace AiSystemMonitor
                 };
                 actionControls.Children.Add(copyIcon);
 
-                if (isDeletable)
+                // Тут у тебе була змінна isDeletable, якої немає в параметрах. Я замінив її на isInteractive,
+                // оскільки якщо воно інтерактивне, логічно, що його можна видалити.
+                var deleteIcon = new TextBlock { Text = "🗑️", Cursor = System.Windows.Input.Cursors.Hand, ToolTip = "Видалити повідомлення" };
+                deleteIcon.MouseLeftButtonDown += (s, e) =>
                 {
-                    var deleteIcon = new TextBlock { Text = "🗑️", Cursor = System.Windows.Input.Cursors.Hand, ToolTip = "Видалити повідомлення" };
-                    deleteIcon.MouseLeftButtonDown += (s, e) =>
-                    {
-                        ChatPanel.Children.Remove(messagePanel);
-                        ShowNotification("Повідомлення успішно видалено 🗑️");
-                    };
-                    actionControls.Children.Add(deleteIcon);
-                }
+                    ChatPanel.Children.Remove(messagePanel);
+                    ShowNotification("Повідомлення успішно видалено 🗑️");
+                };
+                actionControls.Children.Add(deleteIcon);
 
-                // Ховер ефект працює ТІЛЬКИ тут
+                // Ховер ефект
                 messageBorder.MouseEnter += (s, e) =>
                 {
                     messageBorder.Background = hoverBg;
@@ -377,9 +379,16 @@ namespace AiSystemMonitor
             messagePanel.Children.Add(messageBorder);
             ChatPanel.Children.Add(messagePanel);
 
+            // 2. ЗБЕРЕЖЕННЯ: Якщо це Система, запам'ятовуємо всю панель, щоб видалити її наступного разу
+            if (sender == "Система")
+            {
+                _lastSystemMessage = messagePanel;
+            }
+
             ScrollToBottom();
 
-            return messagePanel; // Тепер ми повертаємо всю панель!
+            // ПОВЕРНЕННЯ ЗАВЖДИ В КІНЦІ!
+            return messagePanel;
         }
 
         private void ScrollToBottom() => ChatScrollViewer.ScrollToEnd();
@@ -458,7 +467,7 @@ namespace AiSystemMonitor
             RebuildAiEngine(useLocalNetwork);
 
             // Замість білого системного вікна MessageBox, виводимо статус прямо в чат!
-            AddMessageToChat("Система", "✅ Налаштування успішно збережено. Двигун перезапущено.");
+            AddMessageToChat("Система", "✅ Налаштування успішно збережено. Двигун перезапущено.", "#A6ADC8", false);
         }
 
         private async void ShowNotification(string message)
