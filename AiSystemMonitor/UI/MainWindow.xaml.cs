@@ -172,19 +172,19 @@ namespace AiSystemMonitor
             UserInputBox.Text = string.Empty;
             _isAiThinking = true;
 
+            // ПРАПОРЕЦЬ: Чи використовували ми запасний план?
+            bool wasFallbackTriggered = false;
+
             AddMessageToChat("Ти", userInput);
             ScrollToBottom();
 
-            // 1. СТВОРЮЄМО ТИМЧАСОВИЙ БЛОК (без ховеру і кнопок: isInteractive = false)
             var thinkingPanel = AddMessageToChat("TechBro", "Аналізую запит.", "#6C7086", false);
             ScrollToBottom();
 
-            // Шукаємо текстовий блок всередині панелі, щоб міняти в ньому крапочки
             var border = thinkingPanel.Children.OfType<Border>().FirstOrDefault();
             var grid = border?.Child as Grid;
             var thinkingTextBlock = grid?.Children.OfType<TextBlock>().FirstOrDefault();
 
-            // 2. ЗАПУСКАЄМО АНІМАЦІЮ КРАПОЧОК
             var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
             int dotCount = 1;
             timer.Tick += (s, e) =>
@@ -200,13 +200,57 @@ namespace AiSystemMonitor
             // Чекаємо на відповідь від нейромережі
             AiResponse response = await _aiEngine.ProcessMessageAsync(userInput);
 
-            // 3. ЗУПИНЯЄМО ТАЙМЕР І ВИДАЛЯЄМО ТИМЧАСОВИЙ БЛОК
             timer.Stop();
+
+            // ЗАПАСНИЙ ПЛАН
+            if (response.IsError && response.Text.Contains("canceled") && NetworkToggle.IsChecked == true)
+            {
+                wasFallbackTriggered = true; // Запам'ятовуємо, що ми рятували ситуацію!
+
+                if (thinkingTextBlock != null)
+                    thinkingTextBlock.Text = "Локалка не впоралась, підключаю хмарні потужності...";
+
+                string apiKey = System.IO.File.Exists("apikey.txt") ? System.IO.File.ReadAllText("apikey.txt").Trim() : "";
+
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    // Вимикаємо обробник подій тимчасово, щоб він не викликав RebuildAiEngine двічі
+                    NetworkToggle.Checked -= NetworkToggle_Changed;
+                    NetworkToggle.Unchecked -= NetworkToggle_Changed;
+
+                    NetworkToggle.IsChecked = false; // Візуально вимикаємо тумблер
+
+                    NetworkToggle.Checked += NetworkToggle_Changed;
+                    NetworkToggle.Unchecked += NetworkToggle_Changed;
+
+                    RebuildAiEngine(false); // Офіційно перезбираємо двигун на хмару
+
+                    // Робимо ПОВТОРНИЙ запит
+                    response = await _aiEngine.ProcessMessageAsync(userInput);
+                }
+                else
+                {
+                    response.Text = "Локальна мережа зависла, а ключа для хмари немає. Введи API ключ у налаштуваннях!";
+                }
+            }
+
             ChatPanel.Children.Remove(thinkingPanel);
 
-            // 4. ДОДАЄМО ФІНАЛЬНУ ВІДПОВІДЬ (кнопки і ховер з'являться автоматично)
             string finalColor = response.IsError ? "#F38BA8" : null;
             AddMessageToChat("TechBro", response.Text, finalColor);
+
+            // АВТО-ПОВЕРНЕННЯ НА ЛОКАЛКУ
+            if (wasFallbackTriggered)
+            {
+                // Робимо мікро-паузу, щоб інтерфейс відмалював великий текст
+                await Task.Delay(1000);
+
+                // Виводимо системне повідомлення (без кнопок копіювання)
+                AddMessageToChat("Система", "☁️ Важке завдання виконано хмарою. Повертаюсь в економний локальний режим...", "#A6ADC8", false, false);
+
+                // Просто вмикаємо тумблер! Твій метод NetworkToggle_Changed зробить всю іншу магію сам!
+                NetworkToggle.IsChecked = true;
+            }
 
             _isAiThinking = false;
             ScrollToBottom();
