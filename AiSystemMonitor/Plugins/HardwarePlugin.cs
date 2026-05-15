@@ -1,17 +1,16 @@
-﻿using Microsoft.SemanticKernel;
+﻿using AiSystemMonitor.Services;
+using Microsoft.SemanticKernel;
 using System.ComponentModel;
-using LibreHardwareMonitor.Hardware;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Management;
 using System.Text;
-using System.Linq;
-using System.IO;
 
 namespace AiSystemMonitor.Plugins
 {
     public class HardwarePlugin
     {
-
         public static List<string> LastProcesses = new();
 
         [KernelFunction, Description("ВИКЛИКАЙ ЦЕ коли юзер питає про 'пінг', 'затримку' або перевірку мережі/інтернету. Повертає затримку до сервера в мілісекундах (мс).")]
@@ -19,9 +18,8 @@ namespace AiSystemMonitor.Plugins
         {
             try
             {
-                // Використовуємо сервер Google (8.8.8.8) як еталон для перевірки інтернету
                 using var pingSender = new System.Net.NetworkInformation.Ping();
-                var reply = pingSender.Send("8.8.8.8", 1500); // 1.5 секунди на очікування відповіді
+                var reply = pingSender.Send("8.8.8.8", 1500);
 
                 if (reply.Status == System.Net.NetworkInformation.IPStatus.Success)
                 {
@@ -36,48 +34,25 @@ namespace AiSystemMonitor.Plugins
             }
         }
 
-        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ для перевірки вільного місця на ОДНОМУ конкретному диску. НЕ для швидкості.")]
-        public string GetDiskInfo([Description("Літера диска, наприклад 'C'")] string driveLetter)
-        {
-            if (char.IsDigit(driveLetter[0])) return "Error: Invalid drive letter.";
-
-            string cleanName = driveLetter.Trim().ToUpper().Replace(":", "");
-            var drive = DriveInfo.GetDrives().FirstOrDefault(d => d.IsReady && d.Name.StartsWith(cleanName));
-
-            if (drive != null)
-            {
-                double free = drive.TotalFreeSpace / 1024.0 / 1024.0 / 1024.0;
-                double total = drive.TotalSize / 1024.0 / 1024.0 / 1024.0;
-
-                // Повертаємо сухі дані
-                return $"{free:F1}GB free / {total:F1}GB total";
-            }
-            return "Error: Drive not found.";
-        }
-
         [KernelFunction, Description("ВИКЛИКАЙ ЦЕ ТІЛЬКИ коли юзер прямо просить 'тест швидкості', 'протестуй диск' або 'швидкість диска'. Повертає МБ/с.")]
         public string TestDiskSpeed([Description("Літера диска, наприклад 'C'")] string driveLetter = "C")
         {
             try
             {
-                // Очищаємо літеру диска (якщо бот передасть "C:" або просто "C")
                 string drive = driveLetter.Replace(":", "").Trim().ToUpper() + ":\\";
                 if (!Directory.Exists(drive)) return $"Помилка: Диск {drive} не знайдено.";
 
                 string tempFilePath = Path.Combine(drive, "techbro_speedtest.tmp");
 
-                // Створюємо буфер на 10 МБ і заповнюємо випадковими даними (щоб SSD не читерив)
                 int bufferSize = 10 * 1024 * 1024;
                 byte[] buffer = new byte[bufferSize];
                 new Random().NextBytes(buffer);
 
-                int writes = 20; // Пишемо 20 разів по 10 МБ = 200 МБ загалом
+                int writes = 20;
                 int totalMb = (bufferSize * writes) / (1024 * 1024);
 
-                // Запускаємо секундомір
                 var sw = Stopwatch.StartNew();
 
-                // FileOptions.WriteThrough змушує систему писати прямо на диск, минаючи кеш Windows
                 using (var fs = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize, FileOptions.WriteThrough))
                 {
                     for (int i = 0; i < writes; i++)
@@ -88,7 +63,6 @@ namespace AiSystemMonitor.Plugins
 
                 sw.Stop();
 
-                // Прибираємо за собою
                 if (File.Exists(tempFilePath)) File.Delete(tempFilePath);
 
                 double seconds = sw.Elapsed.TotalSeconds;
@@ -106,28 +80,45 @@ namespace AiSystemMonitor.Plugins
             }
         }
 
-        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ ТІЛЬКИ для перевірки ВІЛЬНОГО МІСЦЯ на дисках ('всі диски', 'пам'ять'). КАТЕГОРИЧНО НЕ ВИКЛИКАЙ, якщо користувач просить перевірити швидкість!")]
-        public string GetAllDisksInfo()
+        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ для перевірки всіх дисків: вільного місця, загального обсягу та стану здоров'я (S.M.A.R.T.). НЕ ДЛЯ ШВИДКОСТІ!")]
+        public string GetDisksStatus()
         {
             try
             {
                 var sb = new StringBuilder();
-                // Шукаємо всі готові до роботи диски
+
+                // 1. Отримуємо стан здоров'я через WMI
+                var healthDict = new Dictionary<string, string>();
+                using (var searcher = new ManagementObjectSearcher("SELECT Model, Status FROM Win32_DiskDrive"))
+                {
+                    foreach (ManagementObject wmi_HD in searcher.Get())
+                    {
+                        string model = wmi_HD["Model"]?.ToString() ?? "Невідомо";
+                        string status = wmi_HD["Status"]?.ToString() ?? "Невідомо";
+                        healthDict[model] = status.ToUpper() == "OK" ? "OK" : status;
+                    }
+                }
+
+                // 2. Отримуємо вільне місце та комбінуємо з S.M.A.R.T.
                 foreach (var drive in DriveInfo.GetDrives().Where(d => d.IsReady))
                 {
                     double free = drive.TotalFreeSpace / 1024.0 / 1024.0 / 1024.0;
                     double total = drive.TotalSize / 1024.0 / 1024.0 / 1024.0;
-                    sb.AppendLine($"- Диск {drive.Name[0]}: вільно {free:F1}ГБ з {total:F1}ГБ");
+
+                    sb.AppendLine($"Диск {drive.Name[0]}: Вільно {free:F1}ГБ / {total:F1}ГБ");
                 }
+
+                sb.AppendLine("\nАпаратний стан (S.M.A.R.T.):");
+                foreach (var h in healthDict) sb.AppendLine($"- {h.Key}: {h.Value}");
+
                 return sb.ToString().Trim();
             }
             catch (Exception ex)
             {
-                return $"Error: {ex.Message}";
+                return $"Помилка: {ex.Message}";
             }
         }
 
-        // Додаємо статичну змінну для збереження позиції
         private static int _lastProcessSkip = 0;
 
         [KernelFunction, Description("ВИКЛИКАЙ ЦЕ ТІЛЬКИ коли юзер просить ПОКАЗАТИ або ВИВЕСТИ 'процеси'. КАТЕГОРИЧНО НЕ ВИКЛИКАЙ, якщо юзер просить ПОЯСНИТИ, ОПИСАТИ або РОЗКАЗАТИ про процес!")]
@@ -155,7 +146,7 @@ namespace AiSystemMonitor.Plugins
                     })
                 })
                 .OrderByDescending(p => p.Memory)
-                .Skip(_lastProcessSkip) // Пропускаємо ті, що вже показали
+                .Skip(_lastProcessSkip)
                 .Take(count)
                 .ToList();
 
@@ -166,36 +157,11 @@ namespace AiSystemMonitor.Plugins
             {
                 var p = topProcesses[i];
                 LastProcesses.Add(p.Name);
-                // Зберігаємо правильну нумерацію
                 lines.Add($"{_lastProcessSkip + i + 1}. {p.Name} — {(p.Memory / 1024 / 1024):F0} МБ");
             }
 
             _lastProcessSkip += count;
             return string.Join("\n", lines);
-        }
-
-        [KernelFunction, Description("Gets the name and current status of the GPU (Video Card).")]
-        public string GetGpuStatus()
-        {
-            try
-            {
-                using var searcher = new ManagementObjectSearcher("select * from Win32_VideoController");
-                var gpu = searcher.Get().Cast<ManagementObject>().FirstOrDefault();
-
-                if (gpu != null)
-                {
-                    string name = gpu["Name"]?.ToString() ?? "Unknown GPU";
-                    string status = gpu["Status"]?.ToString() ?? "Unknown";
-
-                    // Суха констатація фактів
-                    return $"{name} | Status: {status}";
-                }
-                return "Error: GPU not found.";
-            }
-            catch (Exception ex)
-            {
-                return $"Error: {ex.Message}";
-            }
         }
 
         [KernelFunction, Description("ВИКЛИКАЙ ЦЕ ТІЛЬКИ коли юзер прямо пише 'мій пк', 'характеристики', 'яке залізо', 'аналіз пк'. КАТЕГОРИЧНО НЕ ВИКЛИКАЙ на слова 'привіт' або 'як справи'.")]
@@ -211,7 +177,6 @@ namespace AiSystemMonitor.Plugins
                     if (cpu != null)
                     {
                         string socket = cpu["SocketDesignation"]?.ToString() ?? "Невідомо";
-                        // Відрізаємо зайвий рекламний текст процесора
                         string cpuName = cpu["Name"]?.ToString().Replace("6-Core Processor", "").Trim();
                         sb.AppendLine($"Процесор: {cpuName} ({cpu["NumberOfCores"]} ядер, {cpu["NumberOfLogicalProcessors"]} потоків, Сокет: {socket})");
                     }
@@ -222,13 +187,11 @@ namespace AiSystemMonitor.Plugins
                     var board = searcher.Get().Cast<ManagementObject>().FirstOrDefault();
                     if (board != null)
                     {
-                        // Скорочуємо назву компанії і слово "Материнська плата"
                         string manufacturer = board["Manufacturer"]?.ToString().Replace("Technology Co., Ltd.", "").Trim();
                         sb.AppendLine($"Материнка: {manufacturer} {board["Product"]}");
                     }
                 }
 
-                // --- БЛОК ОЗП З ВИЗНАЧЕННЯМ DDR ---
                 double ramGb = 0;
                 using (var searcher = new ManagementObjectSearcher("select TotalPhysicalMemory from Win32_ComputerSystem"))
                 {
@@ -245,7 +208,6 @@ namespace AiSystemMonitor.Plugins
                     {
                         if (ramModule["Speed"] != null) ramSpeed = ramModule["Speed"].ToString();
 
-                        // Визначаємо тип пам'яті (26 = DDR4, 34 = DDR5, 24 = DDR3)
                         if (ramModule["SMBIOSMemoryType"] != null)
                         {
                             int typeNum = Convert.ToInt32(ramModule["SMBIOSMemoryType"]);
@@ -258,7 +220,6 @@ namespace AiSystemMonitor.Plugins
 
                 sb.AppendLine($"ОЗП: {ramGb} ГБ {ddrType}{(string.IsNullOrEmpty(ramSpeed) ? "" : $"({ramSpeed} МГц)")}");
 
-                // ОНОВЛЕНО: Тепер ми витягуємо точний обсяг пам'яті відеокарти (VRAM)
                 using (var searcher = new ManagementObjectSearcher("select Name, AdapterRAM from Win32_VideoController"))
                 {
                     foreach (ManagementObject obj in searcher.Get())
@@ -267,7 +228,6 @@ namespace AiSystemMonitor.Plugins
                         string vramInfo = "";
                         if (obj["AdapterRAM"] != null)
                         {
-                            // AdapterRAM повертає байти. Переводимо в Гігабайти.
                             double vramGb = Math.Ceiling(Convert.ToDouble(obj["AdapterRAM"]) / (1024 * 1024 * 1024));
                             vramInfo = $" ({vramGb}GB VRAM)";
                         }
@@ -283,84 +243,33 @@ namespace AiSystemMonitor.Plugins
             }
         }
 
-        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ ТІЛЬКИ коли юзер питає про 'датчики', 'температуру' або 'навантаження процесора'. НЕ викликай для 'характеристик'.")]
-        public string GetCpuSensors()
+        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ для отримання температур, навантаження, кулерів CPU (процесора) та GPU (відеокарти).")]
+        public string GetSystemSensors()
         {
-            var sb = new StringBuilder();
-            var computer = new Computer { IsCpuEnabled = true };
-            try
-            {
-                computer.Open();
-                foreach (var hardware in computer.Hardware)
-                {
-                    if (hardware.HardwareType == HardwareType.Cpu)
-                    {
-                        hardware.Update();
-                        sb.AppendLine($"[CPU: {hardware.Name}]");
-                        foreach (var sensor in hardware.Sensors)
-                        {
-                            if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue)
-                            {
-                                // Фільтруємо лише Core датчики, ігноруючи системне сміття
-                                if (sensor.Name.Contains("Core") || sensor.Name.Contains("Package") || sensor.Name.Contains("Tctl"))
-                                {
-                                    sb.AppendLine($"- Температура {sensor.Name}: {sensor.Value.Value:F1} °C");
-                                }
-                            }
-                            if (sensor.SensorType == SensorType.Load && sensor.Value.HasValue)
-                            {
-                                if (sensor.Name.Contains("Total"))
-                                {
-                                    sb.AppendLine($"- Загальне навантаження: {sensor.Value.Value:F1} %");
-                                }
-                            }
-                        }
-                    }
-                }
-                computer.Close();
-                string result = sb.ToString().Trim();
-                return string.IsNullOrEmpty(result) ? "Датчики CPU не знайдені." : result;
-            }
-            catch (Exception ex) { return $"Помилка датчиків CPU: {ex.Message}"; }
-        }
+            var stats = SystemMonitor.LatestStats;
 
-        [KernelFunction, Description("Отримує датчики ТІЛЬКИ відеокарти (GPU): температуру, навантаження, вентилятори.")]
-        public string GetGpuSensors()
-        {
-            var sb = new StringBuilder();
-            var computer = new Computer { IsGpuEnabled = true };
-            try
-            {
-                computer.Open();
-                foreach (var hardware in computer.Hardware)
-                {
-                    if (hardware.HardwareType == HardwareType.GpuAmd || hardware.HardwareType == HardwareType.GpuNvidia)
-                    {
-                        hardware.Update();
-                        sb.AppendLine($"[GPU: {hardware.Name}]");
-                        foreach (var sensor in hardware.Sensors)
-                        {
-                            if ((sensor.SensorType == SensorType.Temperature || sensor.SensorType == SensorType.Load || sensor.SensorType == SensorType.Fan) && sensor.Value.HasValue)
-                            {
-                                string unit = sensor.SensorType == SensorType.Temperature ? "°C" : (sensor.SensorType == SensorType.Load ? "%" : "RPM");
-                                sb.AppendLine($"- {sensor.Name}: {sensor.Value.Value:F1} {unit}");
-                            }
-                        }
-                    }
-                }
-                computer.Close();
-                return sb.ToString().Trim();
-            }
-            catch (Exception ex) { return $"Помилка датчиків GPU: {ex.Message}"; }
+            string cpuTempStr = stats.CpuTemp > 0 ? $"{stats.CpuTemp:F1} °C" : "Датчик недоступний";
+            string gpuTempStr = stats.GpuTemp > 0 ? $"{stats.GpuTemp:F1} °C" : "Датчик недоступний";
+            string gpuHotspotStr = stats.GpuHotspot > 0 ? $"{stats.GpuHotspot:F1} °C" : "Недоступно";
+
+            return $"""
+            [CPU]
+            - Навантаження: {stats.CpuUsage}%
+            - Температура: {cpuTempStr}
+    
+            [GPU]
+            - Навантаження: {stats.GpuLoad}%
+            - Температура ядра: {gpuTempStr}
+            - Гаряча точка: {gpuHotspotStr}
+            - Кулери: {stats.GpuFan} RPM
+            """;
         }
 
         [KernelFunction, Description("Перший етап закриття процесу: перевірка безпеки та розрахунок пам'яті. НІКОЛИ не закриває процес одразу.")]
-        public string RequestProcessKill(
-        [Description("Назва процесу (наприклад, chrome, discord)")] string processName)
+        public string RequestProcessKill([Description("Назва процесу (наприклад, chrome, discord)")] string processName)
         {
             try
             {
-                // Список недоторканних процесів
                 string[] systemProcesses = { "explorer", "svchost", "winlogon", "services", "system", "idle", "devenv" };
 
                 if (systemProcesses.Contains(processName.ToLower()))
@@ -380,7 +289,6 @@ namespace AiSystemMonitor.Plugins
 
                 double memoryMb = totalMemory / 1024.0 / 1024.0;
 
-                // Повертаємо спеціальний маркер для нашого AiEngine
                 return $"APPROVE_REQUIRED|{processName}|{memoryMb:F0}";
             }
             catch (Exception ex)
@@ -390,8 +298,7 @@ namespace AiSystemMonitor.Plugins
         }
 
         [KernelFunction, Description("Другий етап закриття процесу: Остаточне закриття процесу. Викликається ТІЛЬКИ після явного 'Так' від користувача.")]
-        public string ConfirmProcessKill(
-            [Description("Назва процесу для закриття")] string processName)
+        public string ConfirmProcessKill([Description("Назва процесу для закриття")] string processName)
         {
             try
             {
@@ -401,7 +308,7 @@ namespace AiSystemMonitor.Plugins
                 {
                     p.Kill();
                 }
-                return $"SUCCESS|Я успішно закрив {count} процес(ів) {processName}. Тепер твоєму ПК дихається легше!";
+                return $"SUCCESS|Закрито процесів: {count} ({processName}).";
             }
             catch (Exception ex)
             {
@@ -423,7 +330,6 @@ namespace AiSystemMonitor.Plugins
                     RedirectStandardOutput = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
-                    // Рядок з кодуванням 866 видалено!
                 };
                 using var process = Process.Start(psi);
                 string output = process.StandardOutput.ReadToEnd();
@@ -467,7 +373,7 @@ namespace AiSystemMonitor.Plugins
                 process.WaitForExit();
 
                 string name = _pendingPowerPlanName;
-                _pendingPowerPlanGuid = null; // Очищаємо пам'ять після успіху
+                _pendingPowerPlanGuid = null;
                 _pendingPowerPlanName = null;
 
                 return $"SUCCESS: Схему живлення успішно змінено на {name}.";
@@ -478,14 +384,12 @@ namespace AiSystemMonitor.Plugins
             }
         }
 
-        // 1. АНАЛІЗАТОР АВТОЗАВАНТАЖЕННЯ
         [KernelFunction, Description("ВИКЛИКАЙ ЦЕ коли юзер питає про автозавантаження або чому ПК довго вмикається. Повертає список програм.")]
         public string GetStartupApps()
         {
             try
             {
                 var sb = new System.Text.StringBuilder();
-                // Читаємо реєстр поточного користувача (не вимагає прав Адміністратора)
                 using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
                 {
                     if (key != null)
@@ -496,57 +400,48 @@ namespace AiSystemMonitor.Plugins
                         }
                     }
                 }
-                return sb.Length > 0 ? sb.ToString() : "Автозавантаження чисте. Зайвих програм немає.";
+                return sb.Length > 0 ? sb.ToString() : "EMPTY_STARTUP";
             }
             catch (Exception ex) { return $"Помилка читання реєстру: {ex.Message}"; }
         }
 
-        // 2. ДІАГНОСТИКА ЗДОРОВ'Я ДИСКІВ (S.M.A.R.T.)
-        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ коли юзер просить перевірити здоров'я, стан або S.M.A.R.T. дисків.")]
-        public string GetDiskHealth()
+        private bool _pendingMaxPower = false;
+        private bool _pendingCloseBrowsers = false;
+
+        [KernelFunction, Description("Перший етап оптимізації. ВИКЛИКАЙ ЦЕ коли юзер просить буст, ігровий режим або закрити браузери. Готує систему, але чекає підтвердження.")]
+        public string RequestOptimization(
+            [Description("Встановити 'Максимальну продуктивність'")] bool enableMaxPower,
+            [Description("Закрити браузери")] bool closeBrowsers)
         {
-            try
+            _pendingMaxPower = enableMaxPower;
+            _pendingCloseBrowsers = closeBrowsers;
+
+            // Якщо треба закрити браузери, бот ПОВИНЕН попередити користувача!
+            if (closeBrowsers)
             {
-                // Запит до WMI виконується миттєво
-                var sb = new System.Text.StringBuilder();
-                var searcher = new ManagementObjectSearcher("SELECT Model, Status FROM Win32_DiskDrive");
-
-                foreach (ManagementObject wmi_HD in searcher.Get())
-                {
-                    string model = wmi_HD["Model"]?.ToString() ?? "Невідомий диск";
-                    string status = wmi_HD["Status"]?.ToString() ?? "Невідомо";
-
-                    // Адаптуємо статус для красивого виводу
-                    string uaStatus = status.ToUpper() == "OK" ? "Чудовий (OK) ✅" : $"Увага: {status} ⚠️";
-
-                    sb.AppendLine($"- {model}: {uaStatus}");
-                }
-                return sb.Length > 0 ? sb.ToString() : "Диски не знайдено.";
+                return "SUCCESS|Я підготував ПК до бусту. УВАГА: Я зараз закрию всі браузери (Chrome, Edge тощо). Збережи свою роботу і напиши 'Так', щоб я продовжив!";
             }
-            catch (Exception ex) { return $"Помилка WMI: {ex.Message}"; }
+
+            return "SUCCESS|Я підготував схему живлення. Напиши 'Так', щоб активувати буст.";
         }
 
-        // 3. ІГРОВИЙ РЕЖИМ (МОДУЛЬНИЙ БУСТ)
-        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ для оптимізації ПК, бусту або ігрового режиму. Нейромережа сама обирає, які параметри (true/false) передати залежно від прохання юзера.")]
-        public string OptimizeSystem(
-            [Description("Встановити 'Максимальну продуктивність' у схемах живлення")] bool enableMaxPower,
-            [Description("Закрити всі важкі фонові браузери (Chrome, Edge, Opera, Firefox)")] bool closeBrowsers)
+        [KernelFunction, Description("Другий етап оптимізації. Викликай ТІЛЬКИ після того, як юзер написав 'Так' на пропозицію бусту.")]
+        public string ConfirmOptimization()
         {
             var sb = new System.Text.StringBuilder();
             sb.AppendLine("Звіт про оптимізацію:");
 
-            if (enableMaxPower)
+            if (_pendingMaxPower)
             {
                 try
                 {
-                    // Системна команда Windows для увімкнення максимальної продуктивності
                     Process.Start(new ProcessStartInfo { FileName = "powercfg", Arguments = "/setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", CreateNoWindow = true, UseShellExecute = false });
-                    sb.AppendLine("- Живлення: Максимальна продуктивність [УВІМКНЕНО] ⚡");
+                    sb.AppendLine("- Максимальна продуктивність: [УВІМКНЕНО] ⚡");
                 }
                 catch { sb.AppendLine("- Живлення: Помилка доступу"); }
             }
 
-            if (closeBrowsers)
+            if (_pendingCloseBrowsers)
             {
                 string[] browsers = { "chrome", "msedge", "opera", "firefox" };
                 int closedCount = 0;
@@ -554,47 +449,17 @@ namespace AiSystemMonitor.Plugins
                 {
                     foreach (var p in Process.GetProcessesByName(b))
                     {
-                        try { p.Kill(); closedCount++; } catch { } // Вбиваємо процес
+                        try { p.Kill(); closedCount++; } catch { }
                     }
                 }
                 sb.AppendLine($"- Фонові браузери: Закрито ({closedCount} процесів) 🧹");
             }
 
-            if (!enableMaxPower && !closeBrowsers)
-            {
-                return "Ти не вказав, що саме треба оптимізувати. Спробуй: 'Закрий браузери' або 'Увімкни макс. живлення'.";
-            }
+            // Очищаємо пам'ять
+            _pendingMaxPower = false;
+            _pendingCloseBrowsers = false;
 
             return sb.ToString();
-        }
-
-        // Приватний хелпер, щоб не дублювати код
-        private string GetSensorsByType(params HardwareType[] targetTypes)
-        {
-            var sb = new StringBuilder();
-            var computer = new Computer { IsCpuEnabled = true, IsGpuEnabled = true, IsMotherboardEnabled = true, IsControllerEnabled = true };
-            try
-            {
-                computer.Open();
-                foreach (var hardware in computer.Hardware)
-                {
-                    if (targetTypes.Contains(hardware.HardwareType))
-                    {
-                        hardware.Update();
-                        foreach (var sensor in hardware.Sensors)
-                        {
-                            if ((sensor.SensorType == SensorType.Temperature || sensor.SensorType == SensorType.Load) && sensor.Value.HasValue && sensor.Value.Value > 0)
-                            {
-                                string unit = sensor.SensorType == SensorType.Temperature ? "°C" : "%";
-                                sb.AppendLine($"{hardware.Name} - {sensor.Name}: {sensor.Value.Value:F1} {unit}");
-                            }
-                        }
-                    }
-                }
-                computer.Close();
-                return sb.ToString().Trim();
-            }
-            catch (Exception ex) { return $"Помилка датчиків: {ex.Message}"; }
         }
     }
 }

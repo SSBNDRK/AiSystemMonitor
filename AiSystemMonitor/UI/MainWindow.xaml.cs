@@ -19,8 +19,39 @@ namespace AiSystemMonitor
 
         public MainWindow()
         {
+            AppConfig.Load();
             InitializeComponent();
             InitializeAppAsync();
+        }
+
+        // Кнопка "Згорнути"
+        private void MinimizeButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.WindowState = WindowState.Minimized;
+        }
+
+        // Кнопка "Закрити" (Хрестик)
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+
+        // Додай цей метод десь в класі MainWindow, наприклад, поруч із CloseButton_Click
+        private void MaximizeButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Тобі знадобиться ім'я кнопки з XAML (я назвав її MaximizeButton)
+            if (this.WindowState == WindowState.Maximized)
+            {
+                this.WindowState = WindowState.Normal;
+                // Можна також змінювати іконку на ☐ назад
+                MaximizeButton.Content = "☐";
+            }
+            else
+            {
+                this.WindowState = WindowState.Maximized;
+                // Можна змінювати іконку на ⧉, коли вікно розгорнуто
+                MaximizeButton.Content = "⧉";
+            }
         }
 
         private async void InitializeAppAsync()

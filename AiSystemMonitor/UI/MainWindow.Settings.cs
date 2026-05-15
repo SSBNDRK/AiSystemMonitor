@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using AiSystemMonitor.Services;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
@@ -30,9 +31,7 @@ namespace AiSystemMonitor
         // 1. Відкриття спливаючого меню
         private async void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            // Зчитуємо API ключ
-            if (System.IO.File.Exists("apikey.txt"))
-                ApiKeyBox.Text = System.IO.File.ReadAllText("apikey.txt").Trim();
+            ApiKeyBox.Text = AppConfig.ApiKey;
 
             // Відкриваємо наше красиве меню
             SettingsPopup.IsOpen = true;
@@ -47,8 +46,8 @@ namespace AiSystemMonitor
             OllamaModelSelector.Items.Clear();
             foreach (var m in models) OllamaModelSelector.Items.Add(m);
 
-            // Читаємо збережену модель, або ставимо першу в списку
-            string savedModel = System.IO.File.Exists("ollamamodel.txt") ? System.IO.File.ReadAllText("ollamamodel.txt").Trim() : "";
+            string savedModel = AppConfig.OllamaModel;
+
             if (!string.IsNullOrEmpty(savedModel) && models.Contains(savedModel))
                 OllamaModelSelector.SelectedItem = savedModel;
             else if (models.Count > 0)
@@ -58,36 +57,16 @@ namespace AiSystemMonitor
         // 2. Збереження з нового меню
         private void SaveSettings_Click(object sender, RoutedEventArgs e)
         {
-            // 1. Читаємо те, що введено зараз
-            string newKey = ApiKeyBox.Text.Trim();
-            string newModel = OllamaModelSelector.SelectedItem?.ToString() ?? "";
+            // Оновлюємо змінні в пам'яті
+            AppConfig.ApiKey = ApiKeyBox.Text.Trim();
+            AppConfig.OllamaModel = OllamaModelSelector.SelectedItem?.ToString() ?? "";
 
-            // 2. Читаємо те, що було збережено раніше
-            string oldKey = System.IO.File.Exists("apikey.txt") ? System.IO.File.ReadAllText("apikey.txt").Trim() : "";
-            string oldModel = System.IO.File.Exists("ollamamodel.txt") ? System.IO.File.ReadAllText("ollamamodel.txt").Trim() : "";
-
-            // 3. ПЕРЕВІРКА НА СПАМ: Якщо нічого не змінилося - просто закриваємо меню і виходимо!
-            if (newKey == oldKey && (newModel == oldModel || newModel == "Завантаження..."))
-            {
-                SettingsPopup.IsOpen = false;
-                return;
-            }
-
-            // 4. Якщо були зміни - зберігаємо
-            System.IO.File.WriteAllText("apikey.txt", newKey);
-
-            if (!string.IsNullOrEmpty(newModel) && newModel != "Завантаження...")
-            {
-                System.IO.File.WriteAllText("ollamamodel.txt", newModel);
-            }
+            // Зберігаємо на диск один раз
+            AppConfig.Save();
 
             SettingsPopup.IsOpen = false;
-
-            // Перезапускаємо нейромережу тільки тому, що налаштування дійсно змінилися
-            bool useLocalNetwork = NetworkToggle.IsChecked == true;
-            RebuildAiEngine(useLocalNetwork);
-
-            AddMessageToChat("Система", "✅ Налаштування оновлено. Двигун перезапущено.", "#A6ADC8", false);
+            RebuildAiEngine(NetworkToggle.IsChecked == true);
+            AddMessageToChat("Система", "✅ Налаштування оновлено.", "#A6ADC8", false);
         }
 
         private async void NetworkToggle_Changed(object sender, RoutedEventArgs e)
@@ -112,7 +91,7 @@ namespace AiSystemMonitor
                     var oldError = ChatPanel.Children.OfType<StackPanel>().FirstOrDefault(p => p.Tag?.ToString() == "OllamaError");
                     if (oldError != null) ChatPanel.Children.Remove(oldError);
 
-                    AddMessageToChat("Система", "☁️ Важке завдання виконано хмарою. Повертаюсь в економний локальний режим...", "#A6ADC8", false);
+                    AddMessageToChat("Система", "❌ Сервер Ollama не відповідає. Переконайся, що програма Ollama запущена на ПК.", "#F38BA8", false);
 
                     if (ChatPanel.Children.Count > 0 && ChatPanel.Children[ChatPanel.Children.Count - 1] is StackPanel lastPanel)
                         lastPanel.Tag = "OllamaError";
@@ -137,10 +116,10 @@ namespace AiSystemMonitor
         {
             try
             {
-                string apiKey = System.IO.File.Exists("apikey.txt") ? System.IO.File.ReadAllText("apikey.txt").Trim() : "";
+                string apiKey = AppConfig.ApiKey;
 
                 // ЧИТАЄМО ЗБЕРЕЖЕНУ ЛОКАЛЬНУ МОДЕЛЬ
-                string savedModel = System.IO.File.Exists("ollamamodel.txt") ? System.IO.File.ReadAllText("ollamamodel.txt").Trim() : null;
+                string savedModel = AppConfig.OllamaModel;
 
                 if (!useLocal && string.IsNullOrEmpty(apiKey))
                 {
