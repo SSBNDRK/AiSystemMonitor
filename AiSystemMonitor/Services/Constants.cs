@@ -3,7 +3,7 @@
     public static class Constants
     {
         // 🤖 Локальна модель
-        public const string LocalModelName = "qwen3:8b";
+        public const string LocalModelName = "qwen3.5:4b";
 
         // ☁️ Хмарні моделі
         public const string GoogleModelName = "gemini-3.1-flash-lite";

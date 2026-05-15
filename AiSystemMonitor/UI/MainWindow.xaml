@@ -221,7 +221,7 @@
                 </Button>
 
                 <Popup x:Name="SettingsPopup" PlacementTarget="{Binding ElementName=SettingsButton}" Placement="Top" HorizontalOffset="-10" VerticalOffset="45" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Slide">
-                    <Border Background="#1E1E2E" BorderBrush="#313244" BorderThickness="1" CornerRadius="16" Padding="20" Width="300" Margin="10">
+                    <Border Background="#1E1E2E" BorderBrush="#313244" BorderThickness="1" CornerRadius="16" Padding="20" Width="270" Margin="10">
                         <Border.Effect>
                             <DropShadowEffect Color="Black" Opacity="0.4" BlurRadius="15" ShadowDepth="3" />
                         </Border.Effect>
@@ -230,6 +230,83 @@
                                 <Path Width="18" Height="18" Fill="#CBA6F7" Stretch="Uniform" VerticalAlignment="Center" Data="M19.4 13L19.4 13C19.4 12.6 19.4 12.2 19.4 11.8L21.5 10.2C21.7 10 21.8 9.7 21.6 9.5L19.6 6C19.5 5.8 19.2 5.7 19 5.8L16.5 6.8C16 6.4 15.4 6.1 14.8 5.8L14.4 3.2C14.4 2.9 14.1 2.7 13.9 2.7H9.9C9.6 2.7 9.4 2.9 9.3 3.2L8.9 5.8C8.3 6.1 7.8 6.4 7.2 6.8L4.8 5.8C4.5 5.7 4.2 5.8 4.1 6L2.1 9.5C2 9.7 2 10 2.2 10.2L4.3 11.8C4.3 12.2 4.3 12.6 4.3 13L2.2 14.6C2 14.8 1.9 15.1 2.1 15.3L4.1 18.8C4.2 19 4.5 19.1 4.7 19L7.2 18C7.7 18.4 8.3 18.7 8.9 19L9.3 21.6C9.3 21.9 9.6 22.1 9.9 22.1H13.9C14.2 22.1 14.4 21.9 14.5 21.6L14.9 19C15.5 18.7 16 18.4 16.6 18L19 19C19.3 19.1 19.6 19 19.7 18.8L21.7 15.3C21.8 15.1 21.8 14.8 21.6 14.6L19.4 13ZM11.8 15.5C9.9 15.5 8.3 13.9 8.3 12C8.3 10.1 9.9 8.5 11.8 8.5C13.7 8.5 15.3 10.1 15.3 12C15.3 13.9 13.7 15.5 11.8 15.5Z" />
                                 <TextBlock Text="Налаштування" Foreground="#CBA6F7" FontSize="16" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center" />
                             </StackPanel>
+                            <TextBlock Text="Локальна модель (Ollama):" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,5"/>
+                            <ComboBox x:Name="OllamaModelSelector" Height="38" Margin="0,0,0,15" Foreground="#CDD6F4" FontSize="13" MaxDropDownHeight="120" Cursor="Hand">
+                                <ComboBox.Template>
+                                    <ControlTemplate TargetType="ComboBox">
+                                        <Grid>
+                                            <ToggleButton x:Name="ToggleButton" Grid.Column="2" Focusable="false" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" ClickMode="Press">
+                                                <ToggleButton.Template>
+                                                    <ControlTemplate TargetType="ToggleButton">
+                                                        <Border x:Name="ToggleBorder" Background="#313244" BorderBrush="#45475A" BorderThickness="1" CornerRadius="8">
+                                                            <Path x:Name="Arrow" Data="M 0 0 L 4 4 L 8 0" Stroke="#BAC2DE" StrokeThickness="2" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" Stretch="None" RenderTransformOrigin="0.5,0.5">
+                                                                <Path.RenderTransform>
+                                                                    <RotateTransform Angle="0"/>
+                                                                </Path.RenderTransform>
+                                                            </Path>
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsChecked" Value="True">
+                                                                <Setter TargetName="Arrow" Property="RenderTransform">
+                                                                    <Setter.Value>
+                                                                        <RotateTransform Angle="180"/>
+                                                                    </Setter.Value>
+                                                                </Setter>
+                                                            </Trigger>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="ToggleBorder" Property="Background" Value="#45475A"/>
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </ToggleButton.Template>
+                                            </ToggleButton>
+
+                                            <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" Margin="12,0,30,0" VerticalAlignment="Center" HorizontalAlignment="Left" />
+
+                                            <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                                <Grid Width="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                                    <Border x:Name="DropDownBorder" Background="#1E1E2E" BorderBrush="#45475A" BorderThickness="1" CornerRadius="8" Margin="0,5,0,5">
+                                                        <ScrollViewer Margin="2,4,8,4" Padding="0" SnapsToDevicePixels="True">
+                                                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
+                                                        </ScrollViewer>
+                                                    </Border>
+                                                </Grid>
+                                            </Popup>
+                                        </Grid>
+                                    </ControlTemplate>
+                                </ComboBox.Template>
+
+                                <ComboBox.ItemContainerStyle>
+                                    <Style TargetType="ComboBoxItem">
+                                        <Setter Property="Padding" Value="7,8,10,8"/>
+
+                                        <Setter Property="Margin" Value="2,2,2,2"/>
+
+                                        <Setter Property="Cursor" Value="Hand"/>
+                                        <Setter Property="Foreground" Value="#BAC2DE"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ComboBoxItem">
+                                                    <Border x:Name="ItemBorder" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="{TemplateBinding Margin}">
+                                                        <ContentPresenter />
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="ItemBorder" Property="Background" Value="#313244"/>
+                                                            <Setter Property="Foreground" Value="#CDD6F4"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="ItemBorder" Property="Background" Value="#45475A"/>
+                                                            <Setter Property="Foreground" Value="#A6E3A1"/>
+                                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ComboBox.ItemContainerStyle>
+                            </ComboBox>
 
                             <TextBlock Text="Хмарний API Ключ (Gemini / Groq / OpenAI):" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,5" />
                             <TextBox x:Name="ApiKeyBox" Height="38" Background="#313244" Foreground="#CDD6F4" BorderThickness="1" BorderBrush="#45475A" Padding="10,0" VerticalContentAlignment="Center" FontSize="13">

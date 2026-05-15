@@ -478,6 +478,96 @@ namespace AiSystemMonitor.Plugins
             }
         }
 
+        // 1. АНАЛІЗАТОР АВТОЗАВАНТАЖЕННЯ
+        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ коли юзер питає про автозавантаження або чому ПК довго вмикається. Повертає список програм.")]
+        public string GetStartupApps()
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                // Читаємо реєстр поточного користувача (не вимагає прав Адміністратора)
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
+                {
+                    if (key != null)
+                    {
+                        foreach (var val in key.GetValueNames())
+                        {
+                            sb.AppendLine($"- {val}");
+                        }
+                    }
+                }
+                return sb.Length > 0 ? sb.ToString() : "Автозавантаження чисте. Зайвих програм немає.";
+            }
+            catch (Exception ex) { return $"Помилка читання реєстру: {ex.Message}"; }
+        }
+
+        // 2. ДІАГНОСТИКА ЗДОРОВ'Я ДИСКІВ (S.M.A.R.T.)
+        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ коли юзер просить перевірити здоров'я, стан або S.M.A.R.T. дисків.")]
+        public string GetDiskHealth()
+        {
+            try
+            {
+                // Запит до WMI виконується миттєво
+                var sb = new System.Text.StringBuilder();
+                var searcher = new ManagementObjectSearcher("SELECT Model, Status FROM Win32_DiskDrive");
+
+                foreach (ManagementObject wmi_HD in searcher.Get())
+                {
+                    string model = wmi_HD["Model"]?.ToString() ?? "Невідомий диск";
+                    string status = wmi_HD["Status"]?.ToString() ?? "Невідомо";
+
+                    // Адаптуємо статус для красивого виводу
+                    string uaStatus = status.ToUpper() == "OK" ? "Чудовий (OK) ✅" : $"Увага: {status} ⚠️";
+
+                    sb.AppendLine($"- {model}: {uaStatus}");
+                }
+                return sb.Length > 0 ? sb.ToString() : "Диски не знайдено.";
+            }
+            catch (Exception ex) { return $"Помилка WMI: {ex.Message}"; }
+        }
+
+        // 3. ІГРОВИЙ РЕЖИМ (МОДУЛЬНИЙ БУСТ)
+        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ для оптимізації ПК, бусту або ігрового режиму. Нейромережа сама обирає, які параметри (true/false) передати залежно від прохання юзера.")]
+        public string OptimizeSystem(
+            [Description("Встановити 'Максимальну продуктивність' у схемах живлення")] bool enableMaxPower,
+            [Description("Закрити всі важкі фонові браузери (Chrome, Edge, Opera, Firefox)")] bool closeBrowsers)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Звіт про оптимізацію:");
+
+            if (enableMaxPower)
+            {
+                try
+                {
+                    // Системна команда Windows для увімкнення максимальної продуктивності
+                    Process.Start(new ProcessStartInfo { FileName = "powercfg", Arguments = "/setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", CreateNoWindow = true, UseShellExecute = false });
+                    sb.AppendLine("- Живлення: Максимальна продуктивність [УВІМКНЕНО] ⚡");
+                }
+                catch { sb.AppendLine("- Живлення: Помилка доступу"); }
+            }
+
+            if (closeBrowsers)
+            {
+                string[] browsers = { "chrome", "msedge", "opera", "firefox" };
+                int closedCount = 0;
+                foreach (var b in browsers)
+                {
+                    foreach (var p in Process.GetProcessesByName(b))
+                    {
+                        try { p.Kill(); closedCount++; } catch { } // Вбиваємо процес
+                    }
+                }
+                sb.AppendLine($"- Фонові браузери: Закрито ({closedCount} процесів) 🧹");
+            }
+
+            if (!enableMaxPower && !closeBrowsers)
+            {
+                return "Ти не вказав, що саме треба оптимізувати. Спробуй: 'Закрий браузери' або 'Увімкни макс. живлення'.";
+            }
+
+            return sb.ToString();
+        }
+
         // Приватний хелпер, щоб не дублювати код
         private string GetSensorsByType(params HardwareType[] targetTypes)
         {

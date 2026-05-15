@@ -89,7 +89,9 @@ namespace AiSystemMonitor.Services
                 {
                     if (hw.HardwareType == HardwareType.GpuAmd || hw.HardwareType == HardwareType.GpuNvidia)
                     {
-                        hw.Update();
+                        // ЗАХИСТ ВІД ПАДІННЯ: Якщо драйвер зайнятий плагіном, просто пропускаємо тік
+                        try { hw.Update(); } catch { continue; }
+
                         foreach (var sensor in hw.Sensors)
                         {
                             if (sensor.SensorType == SensorType.Load && sensor.Name.Contains("Core"))

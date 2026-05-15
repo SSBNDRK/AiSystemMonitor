@@ -10,6 +10,9 @@ namespace AiSystemMonitor
             { "/процеси", "Вивести топ процесів (ОЗП)" },
             { "/датчики", "Температури CPU та GPU" },
             { "/диски", "Вільне місце на всіх дисках" },
+            { "/здоров'я", "Перевірка зносу дисків (S.M.A.R.T.)" },
+            { "/стартап", "Список програм в автозавантаженні" },
+            { "/буст", "Увімкнути максимальну продуктивність" },
             { "/пінг", "Перевірка затримки інтернету" }
         };
 
@@ -70,8 +73,8 @@ namespace AiSystemMonitor
                     {
                         string selected = CommandListBox.SelectedItem.ToString();
 
-                        // ФІКС БАГУ "/мій пк": тепер ділимо рядок по нашому роздільнику " — "
                         string command = selected.Split(new[] { " — " }, StringSplitOptions.None)[0].Trim();
+                        command = command.TrimStart('/');
 
                         UserInputBox.Text = command + " "; // Одразу додаємо пробіл в кінці!
                         UserInputBox.CaretIndex = UserInputBox.Text.Length; // Ставимо курсор в кінець

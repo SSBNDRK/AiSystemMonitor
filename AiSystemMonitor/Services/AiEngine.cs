@@ -24,6 +24,7 @@ namespace AiSystemMonitor.Services
         private PromptExecutionSettings _settings;
 
         public string CurrentModelName { get; private set; } = "Ініціалізація...";
+        public event Action<string> OnToolExecuting;
 
         public AiEngine()
         {
@@ -33,7 +34,7 @@ namespace AiSystemMonitor.Services
 
 КРИТИЧНЕ ПРАВИЛО:
 Якщо користувач пише короткі команди , ти ПОВИНЕН діяти як бездумний термінал:
-1. Виклич відповідний інструмент (tool).
+1. Виклич відповідний інструмент (tool). Для бусту сам виріши, які параметри (true/false) передати.
 2. Виведи отримані дані СЛОВО В СЛОВО у вигляді списку, наступні елементи з нового рядка.
 3. АБСОЛЮТНА ЗАБОРОНА: Тобі категорично заборонено аналізувати ці дані чи оцінювати.
 
@@ -59,13 +60,13 @@ namespace AiSystemMonitor.Services
             catch { return false; }
         }
 
-        public void RebuildEngine(bool useLocal, string apiKey)
+        public void RebuildEngine(bool useLocal, string apiKey, string localModelName = null)
         {
             var builder = Kernel.CreateBuilder();
             if (useLocal)
             {
-                // Беремо назву з констант
-                CurrentModelName = Constants.LocalModelName;
+                // Якщо передали ім'я - юзаємо його, інакше беремо дефолтне з констант
+                CurrentModelName = string.IsNullOrWhiteSpace(localModelName) ? Constants.LocalModelName : localModelName;
 
                 builder.AddOllamaChatCompletion(modelId: CurrentModelName, endpoint: new Uri("http://localhost:11434"));
                 _settings = new OllamaPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(autoInvoke: false), Temperature = 0.2f, };
@@ -127,7 +128,7 @@ namespace AiSystemMonitor.Services
             var response = new AiResponse { IsError = false };
             _history.AddUserMessage(userInput);
 
-            const int maxHistorySize = 12;
+            const int maxHistorySize = 20;
 
             while (_history.Count > maxHistorySize)
             {
@@ -169,6 +170,8 @@ namespace AiSystemMonitor.Services
                         {
                             if (_kernel.Plugins.TryGetFunction("HardwarePlugin", item.FunctionName, out var function))
                             {
+                                OnToolExecuting?.Invoke(item.FunctionName);
+
                                 var context = new KernelArguments();
 
                                 if (item.Arguments != null)
@@ -247,6 +250,24 @@ namespace AiSystemMonitor.Services
             }
 
             return response;
+        }
+        public async Task<List<string>> GetAvailableOllamaModelsAsync()
+        {
+            try
+            {
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+                string json = await client.GetStringAsync("http://127.0.0.1:11434/api/tags");
+
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                var models = new List<string>();
+
+                foreach (var model in doc.RootElement.GetProperty("models").EnumerateArray())
+                {
+                    models.Add(model.GetProperty("name").GetString());
+                }
+                return models.Count > 0 ? models : new List<string> { Constants.LocalModelName };
+            }
+            catch { return new List<string> { Constants.LocalModelName }; }
         }
     }
 }

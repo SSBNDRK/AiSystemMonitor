@@ -34,6 +34,8 @@ namespace AiSystemMonitor
             var grid = border?.Child as Grid;
             var thinkingTextBlock = grid?.Children.OfType<TextBlock>().FirstOrDefault();
 
+            // 1. СТАТУС РОБОТИ (Змінюється, коли викликаються плагіни)
+            string currentStatus = "Аналізую запит";
             var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
             int dotCount = 1;
             timer.Tick += (s, e) =>
@@ -41,40 +43,41 @@ namespace AiSystemMonitor
                 if (thinkingTextBlock != null)
                 {
                     dotCount = dotCount > 3 ? 1 : dotCount + 1;
-                    thinkingTextBlock.Text = "Аналізую запит" + new string('.', dotCount);
+                    thinkingTextBlock.Text = currentStatus + new string('.', dotCount);
                 }
             };
             timer.Start();
 
+            // 2. ПІДКЛЮЧАЄМОСЬ ДО ПЛАГІНІВ (Змінюємо текст статусу)
+            Action<string> toolHandler = (toolName) =>
+            {
+                Dispatcher.Invoke(() => { currentStatus = $"Виконую: {toolName}"; });
+            };
+            _aiEngine.OnToolExecuting += toolHandler; // Підписались
+
             // Чекаємо на відповідь від нейромережі
             AiResponse response = await _aiEngine.ProcessMessageAsync(userInput);
 
+            _aiEngine.OnToolExecuting -= toolHandler; // Відписались
             timer.Stop();
 
-            // ЗАПАСНИЙ ПЛАН
+            // ЗАПАСНИЙ ПЛАН (Залишився без змін)
             if (response.IsError && response.Text.Contains("canceled") && NetworkToggle.IsChecked == true)
             {
-                wasFallbackTriggered = true; // Запам'ятовуємо, що ми рятували ситуацію!
-
+                wasFallbackTriggered = true;
                 if (thinkingTextBlock != null)
-                    thinkingTextBlock.Text = "Локалка не впоралась, підключаю хмарні потужності...";
+                    thinkingTextBlock.Text = "Локалка не впоралась, підключаю хмару...";
 
                 string apiKey = System.IO.File.Exists("apikey.txt") ? System.IO.File.ReadAllText("apikey.txt").Trim() : "";
-
                 if (!string.IsNullOrEmpty(apiKey))
                 {
-                    // Вимикаємо обробник подій тимчасово, щоб він не викликав RebuildAiEngine двічі
                     NetworkToggle.Checked -= NetworkToggle_Changed;
                     NetworkToggle.Unchecked -= NetworkToggle_Changed;
-
-                    NetworkToggle.IsChecked = false; // Візуально вимикаємо тумблер
-
+                    NetworkToggle.IsChecked = false;
                     NetworkToggle.Checked += NetworkToggle_Changed;
                     NetworkToggle.Unchecked += NetworkToggle_Changed;
 
-                    RebuildAiEngine(false); // Офіційно перезбираємо двигун на хмару
-
-                    // Робимо ПОВТОРНИЙ запит
+                    RebuildAiEngine(false);
                     response = await _aiEngine.ProcessMessageAsync(userInput);
                 }
                 else
@@ -85,19 +88,26 @@ namespace AiSystemMonitor
 
             ChatPanel.Children.Remove(thinkingPanel);
 
+            // 3. СТВОРЮЄМО ПОРОЖНЄ ПОВІДОМЛЕННЯ І ДРУКУЄМО ТЕКСТ!
             string finalColor = response.IsError ? "#F38BA8" : null;
-            AddMessageToChat("TechBro", response.Text, finalColor);
+            var finalPanel = AddMessageToChat("TechBro", "", finalColor); // Передаємо порожній рядок ""
+
+            // Дістаємо TextBlock із щойно створеного повідомлення
+            var finalBorder = finalPanel.Children.OfType<Border>().FirstOrDefault();
+            var finalGrid = finalBorder?.Child as Grid;
+            var targetTextBlock = finalGrid?.Children.OfType<TextBlock>().FirstOrDefault();
+
+            if (targetTextBlock != null)
+            {
+                // ЗАПУСКАЄМО ЕФЕКТ ДРУКАРСЬКОЇ МАШИНКИ
+                await TypewriterEffectAsync(targetTextBlock, response.Text);
+            }
 
             // АВТО-ПОВЕРНЕННЯ НА ЛОКАЛКУ
             if (wasFallbackTriggered)
             {
-                // Робимо мікро-паузу, щоб інтерфейс відмалював великий текст
                 await Task.Delay(1000);
-
-                // Виводимо системне повідомлення
-                AddMessageToChat("Система", "☁️ Важке завдання виконано хмарою. Повертаюсь в економний локальний режим...", "#A6ADC8");
-
-                // Просто вмикаємо тумблер! Твій метод NetworkToggle_Changed зробить всю іншу магію сам!
+                AddMessageToChat("Система", "☁️ Важке завдання виконано хмарою. Повертаюсь в економний локальний режим...", "#A6ADC8", false);
                 NetworkToggle.IsChecked = true;
             }
 
@@ -111,14 +121,13 @@ namespace AiSystemMonitor
 
         private StackPanel AddMessageToChat(string sender, string message, string hexColor = null, bool isInteractive = true)
         {
-            // 1. АВТОВИДАЛЕННЯ: Якщо пише НЕ Система, прибираємо з екрану попереднє системне повідомлення
-            if (sender != "Система" && _lastSystemMessage != null)
+            if (_lastSystemMessage != null)
             {
-                ChatPanel.Children.Remove(_lastSystemMessage); // Виправлено на ChatPanel
+                ChatPanel.Children.Remove(_lastSystemMessage);
                 _lastSystemMessage = null;
             }
 
-            var messagePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 15) };
+            var messagePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 15) }; 
             var headerPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
 
             string displayName = sender == "TechBro" ? $"TechBro [{_aiEngine.CurrentModelName}]" : sender;
@@ -248,6 +257,18 @@ namespace AiSystemMonitor
 
             // ПОВЕРНЕННЯ ЗАВЖДИ В КІНЦІ!
             return messagePanel;
+        }
+
+        // Метод для плавного виводу тексту
+        private async Task TypewriterEffectAsync(TextBlock targetTextBlock, string fullText)
+        {
+            targetTextBlock.Text = ""; // Очищаємо текст
+            foreach (char c in fullText)
+            {
+                targetTextBlock.Text += c;
+                ScrollToBottom(); // Скролимо вниз під час друку
+                await Task.Delay(10); // Швидкість: 10 мілісекунд на 1 символ
+            }
         }
     }
 }
