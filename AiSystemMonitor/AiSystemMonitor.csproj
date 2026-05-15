@@ -11,6 +11,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="UI\TechBroImage.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="UI\TechBroImage.ico">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
     <Resource Include="UI\TechBroImage1.ico">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Resource>
@@ -23,12 +30,6 @@
     <PackageReference Include="Microsoft.SemanticKernel.Connectors.Ollama" Version="1.76.0-alpha" />
     <PackageReference Include="Microsoft.SemanticKernel.Connectors.OpenAI" Version="1.76.0" />
     <PackageReference Include="System.Management" Version="11.0.0-preview.4.26230.115" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Update="UI\TechBroImage.ico">
-      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
-    </None>
   </ItemGroup>
 
   <ItemGroup>

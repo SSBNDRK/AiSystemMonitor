@@ -390,19 +390,17 @@ namespace AiSystemMonitor.Plugins
             try
             {
                 var sb = new System.Text.StringBuilder();
-                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
+                using (var searcher = new ManagementObjectSearcher("SELECT Name FROM Win32_StartupCommand"))
                 {
-                    if (key != null)
+                    foreach (ManagementObject obj in searcher.Get())
                     {
-                        foreach (var val in key.GetValueNames())
-                        {
-                            sb.AppendLine($"- {val}");
-                        }
+                        string name = obj["Name"]?.ToString() ?? "";
+                        if (!string.IsNullOrWhiteSpace(name)) sb.AppendLine($"- {name}");
                     }
                 }
                 return sb.Length > 0 ? sb.ToString() : "EMPTY_STARTUP";
             }
-            catch (Exception ex) { return $"Помилка читання реєстру: {ex.Message}"; }
+            catch (Exception ex) { return $"Помилка читання WMI: {ex.Message}"; }
         }
 
         private bool _pendingMaxPower = false;
@@ -460,6 +458,137 @@ namespace AiSystemMonitor.Plugins
             _pendingCloseBrowsers = false;
 
             return sb.ToString();
+        }
+
+        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ коли юзер питає про сині екрани (BSOD), вильоти ігор, краші, або 'чому вимкнувся/перезавантажився ПК'.")]
+        public string GetRecentCrashes()
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                // Підключаємося до системного журналу Windows
+                var eventLog = new System.Diagnostics.EventLog("System");
+
+                // Шукаємо критичні помилки за останні 24 години
+                var recentErrors = eventLog.Entries.Cast<System.Diagnostics.EventLogEntry>()
+                    .Where(e => e.TimeGenerated > DateTime.Now.AddDays(-1) &&
+                               (e.EntryType == System.Diagnostics.EventLogEntryType.Error ||
+                                e.EntryType == System.Diagnostics.EventLogEntryType.Warning))
+                    .Where(e => e.Source.Contains("Kernel-Power") || e.Source.Contains("BugCheck") || e.Source.Contains("Display"))
+                    .OrderByDescending(e => e.TimeGenerated)
+                    .Take(3)
+                    .ToList();
+
+                if (recentErrors.Count == 0)
+                    return "Системний журнал чистий. Критичних збоїв живлення (Kernel-Power), синіх екранів (BugCheck) чи вильотів відеодрайвера за останні 24 години не зафіксовано.";
+
+                sb.AppendLine("Останні зафіксовані системні збої:");
+                foreach (var entry in recentErrors)
+                {
+                    // Форматуємо для ШІ: [Час] Джерело: Текст помилки
+                    sb.AppendLine($"- [{entry.TimeGenerated:HH:mm}] Джерело: {entry.Source}. Деталі: {entry.Message.Split('.')[0]}");
+                }
+
+                return sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                return $"Помилка читання журналу Windows: {ex.Message}";
+            }
+        }
+
+        [KernelFunction, Description("Перший етап бусту. Аналізує реальні програми юзера (на робочому столі та важкі програми в треї), які можна закрити.")]
+        public string AnalyzeForBoost()
+        {
+            try
+            {
+                var myProcess = Process.GetCurrentProcess().ProcessName.ToLower();
+
+                var activeApps = Process.GetProcesses()
+                    .Where(p =>
+                    {
+                        try
+                        {
+                            string name = p.ProcessName.ToLower();
+
+                            // 1. ЗАХИСТ: Не чіпаємо себе, Провідник та Ollama
+                            if (name == myProcess || name == "explorer" || name.Contains("ollama")) return false;
+
+                            // 2. ФІЛЬТР СИСТЕМИ: Відкидаємо все, що лежить у папці Windows
+                            string path = p.MainModule?.FileName?.ToLower() ?? "";
+                            if (path.StartsWith(@"c:\windows")) return false;
+
+                            // 3. ЛОВИМО ТРЕЙ: Беремо ті, що мають вікно, АБО їдять більше 60 МБ (Discord, Steam, Telegram)
+                            long memMb = p.WorkingSet64 / 1024 / 1024;
+                            return p.MainWindowHandle != IntPtr.Zero || memMb > 60;
+                        }
+                        catch
+                        {
+                            // Якщо Access Denied — це системний процес рівня ядра/служб. Відкидаємо.
+                            return false;
+                        }
+                    })
+                    .GroupBy(p => p.ProcessName)
+                    .Select(g => new
+                    {
+                        Name = g.Key,
+                        MemoryMb = g.Sum(p => { try { return p.WorkingSet64; } catch { return 0; } }) / 1024 / 1024
+                    })
+                    .Where(p => p.MemoryMb > 50) // Фінальний фільтр дрібниць
+                    .OrderByDescending(p => p.MemoryMb)
+                    .ToList();
+
+                if (activeApps.Count == 0)
+                    return "SUCCESS|Важких фонових програм не знайдено. Можу тільки увімкнути Максимальну продуктивність живлення. Запитай юзера, чи вмикати.";
+
+                var sb = new StringBuilder("SUCCESS|Я знайшов такі відкриті та фонові програми:\n");
+                foreach (var app in activeApps)
+                {
+                    sb.AppendLine($"- {app.Name} ({app.MemoryMb} МБ)");
+                }
+                sb.AppendLine("Запитай у юзера: 'Які з цих програм закрити для бусту, чи закрити всі?'");
+
+                return sb.ToString();
+            }
+            catch (Exception ex) { return $"ERROR|{ex.Message}"; }
+        }
+
+        [KernelFunction, Description("Другий етап бусту. Викликається ТІЛЬКИ після того, як юзер погодився на буст і сказав, що саме закривати.")]
+        public string ExecuteBoost(
+            [Description("Увімкнути макс. продуктивність живлення (true/false)")] bool enableMaxPower,
+            [Description("Назви процесів для закриття через кому (наприклад: 'chrome,telegram'). Якщо нічого не треба закривати — передай порожній рядок.")] string appsToClose)
+        {
+            var sb = new StringBuilder("SUCCESS|\nЗвіт про буст:\n");
+
+            if (enableMaxPower)
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo { FileName = "powercfg", Arguments = "/setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", CreateNoWindow = true, UseShellExecute = false });
+                    sb.AppendLine("- Живлення: Макс. продуктивність [УВІМКНЕНО] ⚡");
+                }
+                catch { sb.AppendLine("- Живлення: Помилка доступу"); }
+            }
+
+            if (!string.IsNullOrWhiteSpace(appsToClose) && appsToClose.ToLower() != "none")
+            {
+                var apps = appsToClose.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(a => a.Trim()).ToList();
+                int closedTotal = 0;
+
+                foreach (var appName in apps)
+                {
+                    int count = 0;
+                    foreach (var p in Process.GetProcessesByName(appName))
+                    {
+                        try { p.Kill(); count++; closedTotal++; } catch { }
+                    }
+                    if (count > 0) sb.AppendLine($"- {appName}: закрито ({count} процесів) 🧹");
+                }
+
+                if (closedTotal == 0) sb.AppendLine("- Програми: Не вдалося закрити вказані програми.");
+            }
+
+            return sb.ToString().Trim();
         }
     }
 }
