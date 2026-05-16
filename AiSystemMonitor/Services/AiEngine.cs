@@ -109,7 +109,12 @@ namespace AiSystemMonitor.Services
                 _settings = new OpenAIPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(), Temperature = 0.3, MaxTokens = 250 };
             }
 
-            builder.Plugins.AddFromType<HardwarePlugin>();
+            builder.Plugins.AddFromType<SystemInfoPlugin>();
+            builder.Plugins.AddFromType<ProcessPlugin>();
+            builder.Plugins.AddFromType<PowerPlugin>();
+            builder.Plugins.AddFromType<MaintenancePlugin>();
+            builder.Plugins.AddFromType<NetworkPlugin>();
+
             _kernel = builder.Build();
             _chat = _kernel.GetRequiredService<IChatCompletionService>();
         }
@@ -159,7 +164,15 @@ namespace AiSystemMonitor.Services
 
                         try
                         {
-                            if (_kernel.Plugins.TryGetFunction("HardwarePlugin", item.FunctionName, out var function))
+                            KernelFunction function = null;
+
+                            foreach (var plugin in _kernel.Plugins)
+                            {
+                                if (plugin.TryGetFunction(item.FunctionName, out function))
+                                    break;
+                            }
+
+                            if (function != null)
                             {
                                 OnToolExecuting?.Invoke(item.FunctionName);
 
@@ -174,7 +187,6 @@ namespace AiSystemMonitor.Services
                                 }
 
                                 var res = await function.InvokeAsync(_kernel, context);
-
                                 functionResult = res.GetValue<string>() ?? "Success";
                             }
                         }
@@ -210,7 +222,11 @@ namespace AiSystemMonitor.Services
                 finalOutput = finalOutput.Replace("```json", "").Replace("```", "").Trim();
                 finalOutput = finalOutput.Replace("**", "");
 
-                if (finalOutput.Contains("\"name\": \"HardwarePlugin_") || finalOutput.Contains("\"parameters\":"))
+                if (
+                    finalOutput.Contains("\"parameters\":") ||
+                    finalOutput.Contains("\"arguments\":") ||
+                    finalOutput.Contains("\"name\":") && finalOutput.Contains("Plugin_")
+                )
                 {
                     finalOutput = "Бро, я трохи заплутався в системних даних. Спробуй перефразувати запит!";
                 }
