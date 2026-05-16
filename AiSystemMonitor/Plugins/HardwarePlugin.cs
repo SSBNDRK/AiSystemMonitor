@@ -265,21 +265,36 @@ namespace AiSystemMonitor.Plugins
             """;
         }
 
-        [KernelFunction, Description("Перший етап закриття процесу: перевірка безпеки та розрахунок пам'яті. НІКОЛИ не закриває процес одразу.")]
+        private string _pendingKillProcessName = null;
+
+        [KernelFunction, Description("Перший етап закриття процесу: перевіряє безпеку, рахує пам'ять і зберігає процес для підтвердження. НІКОЛИ не закриває процес одразу.")]
         public string RequestProcessKill([Description("Назва процесу (наприклад, chrome, discord)")] string processName)
         {
             try
             {
-                string[] systemProcesses = { "explorer", "svchost", "winlogon", "services", "system", "idle", "devenv" };
+                if (string.IsNullOrWhiteSpace(processName))
+                    return "ERROR|Назва процесу порожня.";
+
+                processName = processName.Trim();
+
+                string[] systemProcesses =
+                {
+            "explorer", "svchost", "winlogon", "services", "system",
+            "idle", "devenv", "csrss", "lsass", "smss", "dwm"
+        };
 
                 if (systemProcesses.Contains(processName.ToLower()))
                 {
-                    return $"CRITICAL_ERROR|Бро, {processName} — це системний процес. Якщо я його закрию, твій ПК просто ляже. Я не буду цього робити.";
+                    _pendingKillProcessName = null;
+                    return $"CRITICAL_ERROR|Бро, {processName} — це системний процес. Якщо я його закрию, твій ПК може зависнути або вилетіти. Я не буду цього робити.";
                 }
 
                 var processes = Process.GetProcessesByName(processName);
                 if (processes.Length == 0)
+                {
+                    _pendingKillProcessName = null;
                     return $"NOT_FOUND|Процес {processName} не знайдено серед запущених.";
+                }
 
                 long totalMemory = 0;
                 foreach (var p in processes)
@@ -289,29 +304,46 @@ namespace AiSystemMonitor.Plugins
 
                 double memoryMb = totalMemory / 1024.0 / 1024.0;
 
+                // ВАЖЛИВО: зберігаємо процес, який очікує підтвердження
+                _pendingKillProcessName = processName;
+
                 return $"APPROVE_REQUIRED|{processName}|{memoryMb:F0}";
             }
             catch (Exception ex)
             {
+                _pendingKillProcessName = null;
                 return $"ERROR|Помилка при підготовці: {ex.Message}";
             }
         }
 
-        [KernelFunction, Description("Другий етап закриття процесу: Остаточне закриття процесу. Викликається ТІЛЬКИ після явного 'Так' від користувача.")]
-        public string ConfirmProcessKill([Description("Назва процесу для закриття")] string processName)
+        [KernelFunction, Description("Другий етап закриття процесу. Викликається ТІЛЬКИ після явного 'Так' від користувача. Не приймає назву процесу, а закриває тільки раніше підготовлений процес.")]
+        public string ConfirmProcessKill()
         {
             try
             {
+                if (string.IsNullOrWhiteSpace(_pendingKillProcessName))
+                    return "ERROR|Немає процесу, який очікує підтвердження. Спочатку треба викликати RequestProcessKill.";
+
+                string processName = _pendingKillProcessName;
+                _pendingKillProcessName = null;
+
                 var processes = Process.GetProcessesByName(processName);
                 int count = processes.Length;
+
+                if (count == 0)
+                    return $"NOT_FOUND|Процес {processName} вже не запущений.";
+
                 foreach (var p in processes)
                 {
-                    p.Kill();
+                    try { p.Kill(); }
+                    catch { }
                 }
+
                 return $"SUCCESS|Закрито процесів: {count} ({processName}).";
             }
             catch (Exception ex)
             {
+                _pendingKillProcessName = null;
                 return $"ERROR|Не вдалося завершити дію: {ex.Message}";
             }
         }
@@ -407,7 +439,7 @@ namespace AiSystemMonitor.Plugins
         private bool _pendingCloseBrowsers = false;
 
         [KernelFunction, Description("Перший етап оптимізації. ВИКЛИКАЙ ЦЕ коли юзер просить буст, ігровий режим або закрити браузери. Готує систему, але чекає підтвердження.")]
-        public string RequestOptimization(
+        public string RequestBrowserBoost(
             [Description("Встановити 'Максимальну продуктивність'")] bool enableMaxPower,
             [Description("Закрити браузери")] bool closeBrowsers)
         {
@@ -424,8 +456,11 @@ namespace AiSystemMonitor.Plugins
         }
 
         [KernelFunction, Description("Другий етап оптимізації. Викликай ТІЛЬКИ після того, як юзер написав 'Так' на пропозицію бусту.")]
-        public string ConfirmOptimization()
+        public string ConfirmBrowserBoost()
         {
+            if (!_pendingMaxPower && !_pendingCloseBrowsers)
+                return "ERROR|Немає підготовленого бусту. Спочатку треба викликати RequestBrowserBoost.";
+
             var sb = new System.Text.StringBuilder();
             sb.AppendLine("Звіт про оптимізацію:");
 
@@ -498,7 +533,7 @@ namespace AiSystemMonitor.Plugins
         }
 
         [KernelFunction, Description("Перший етап бусту. Аналізує реальні програми юзера (на робочому столі та важкі програми в треї), які можна закрити.")]
-        public string AnalyzeForBoost()
+        public string AnalyzeBackgroundAppsForOptimization()
         {
             try
             {
@@ -554,7 +589,7 @@ namespace AiSystemMonitor.Plugins
         }
 
         [KernelFunction, Description("Другий етап бусту. Викликається ТІЛЬКИ після того, як юзер погодився на буст і сказав, що саме закривати.")]
-        public string ExecuteBoost(
+        public string ExecuteSelectedAppsOptimization(
             [Description("Увімкнути макс. продуктивність живлення (true/false)")] bool enableMaxPower,
             [Description("Назви процесів для закриття через кому (наприклад: 'chrome,telegram'). Якщо нічого не треба закривати — передай порожній рядок.")] string appsToClose)
         {

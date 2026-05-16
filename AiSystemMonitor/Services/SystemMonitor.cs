@@ -169,7 +169,6 @@ namespace AiSystemMonitor.Services
 
             OnStatsUpdated?.Invoke(this, args);
         }
-
         private void UpdateNetworkStats(HardwareUpdateEventArgs args)
         {
             long totalBytes = 0;
