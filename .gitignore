@@ -365,3 +365,5 @@ FodyWeavers.xsd
 # TechBro local settings / secrets
 apikey.txt
 ollamamodel.txt
+**/apikey.txt
+**/ollamamodel.txt
