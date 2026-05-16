@@ -361,3 +361,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# TechBro local settings / secrets
+apikey.txt
+ollamamodel.txt
