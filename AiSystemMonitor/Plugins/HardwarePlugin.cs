@@ -1,17 +1,22 @@
 ﻿using AiSystemMonitor.Services;
 using Microsoft.SemanticKernel;
+using Microsoft.Win32;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace AiSystemMonitor.Plugins
 {
     public class HardwarePlugin
     {
         public static List<string> LastProcesses = new();
+        private List<string> _pendingCleanupFiles = new();
 
         [KernelFunction, Description("ВИКЛИКАЙ ЦЕ коли юзер питає про 'пінг', 'затримку' або перевірку мережі/інтернету. Повертає затримку до сервера в мілісекундах (мс).")]
         public string GetNetworkPing()
@@ -31,6 +36,69 @@ namespace AiSystemMonitor.Plugins
             catch (Exception ex)
             {
                 return $"Помилка перевірки мережі: {ex.Message}";
+            }
+        }
+
+        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ коли юзер просить перевірити мережу, інтернет, DNS, шлюз або стабільність підключення. Робить коротку діагностику мережі.")]
+        public string GetNetworkDiagnostics()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("Діагностика мережі:");
+
+            sb.AppendLine(CheckPing("8.8.8.8", "Google DNS"));
+            sb.AppendLine(CheckPing("1.1.1.1", "Cloudflare DNS"));
+
+            try
+            {
+                var addresses = Dns.GetHostAddresses("google.com");
+                sb.AppendLine(addresses.Length > 0
+                    ? "- DNS: працює"
+                    : "- DNS: не вдалося отримати адресу");
+            }
+            catch
+            {
+                sb.AppendLine("- DNS: помилка перевірки");
+            }
+
+            try
+            {
+                var gateway = NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(ni => ni.OperationalStatus == OperationalStatus.Up && ni.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                    .SelectMany(ni => ni.GetIPProperties().GatewayAddresses)
+                    .Select(g => g.Address.ToString())
+                    .FirstOrDefault(g => !string.IsNullOrWhiteSpace(g) && g != "0.0.0.0");
+
+                if (!string.IsNullOrWhiteSpace(gateway))
+                    sb.AppendLine(CheckPing(gateway, "Шлюз"));
+                else
+                    sb.AppendLine("- Шлюз: не знайдено");
+            }
+            catch
+            {
+                sb.AppendLine("- Шлюз: помилка перевірки");
+            }
+
+            return sb.ToString().Trim();
+        }
+
+        private string CheckPing(string host, string label)
+        {
+            try
+            {
+                using var pingSender = new System.Net.NetworkInformation.Ping();
+                var reply = pingSender.Send(host, 1500);
+
+                if (reply.Status == System.Net.NetworkInformation.IPStatus.Success)
+                {
+                    string timeText = reply.RoundtripTime == 0 ? "<1" : reply.RoundtripTime.ToString();
+                    return $"- {label}: {timeText} мс";
+                }
+
+                return $"- {label}: недоступний ({reply.Status})";
+            }
+            catch
+            {
+                return $"- {label}: помилка перевірки";
             }
         }
 
@@ -352,27 +420,83 @@ namespace AiSystemMonitor.Plugins
         private string _pendingPowerPlanName = null;
 
         [KernelFunction("GetPowerPlans")]
-        [Description("Отримує список усіх доступних схем живлення Windows. Активна схема позначена зірочкою (*).")]
+        [Description("Отримує список схем живлення Windows у зручному вигляді. Активна схема позначена.")]
         public string GetPowerPlans()
         {
             try
             {
-                var psi = new ProcessStartInfo("powercfg", "/list")
-                {
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var process = Process.Start(psi);
-                string output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit();
+                var plans = ReadPowerPlans();
 
-                return output;
+                if (plans.Count == 0)
+                    return "Не вдалося знайти схеми живлення Windows.";
+
+                var sb = new StringBuilder();
+                sb.AppendLine("Доступні режими електроживлення:");
+
+                for (int i = 0; i < plans.Count; i++)
+                {
+                    string activeMark = plans[i].IsActive ? " — активний зараз" : "";
+                    sb.AppendLine($"{i + 1}. {plans[i].Name}{activeMark}");
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("Можеш написати: «увімкни високу продуктивність», «увімкни збалансований режим» або «увімкни економію».");
+
+                return sb.ToString().Trim();
             }
             catch (Exception ex)
             {
-                return $"Error: {ex.Message}";
+                return $"Помилка читання схем живлення: {ex.Message}";
             }
+        }
+
+        private List<PowerPlanInfo> ReadPowerPlans()
+        {
+            var plans = new List<PowerPlanInfo>();
+
+            var psi = new ProcessStartInfo("powercfg", "/list")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(psi);
+            string output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+
+            foreach (var line in output.Split('\n'))
+            {
+                var guidMatch = Regex.Match(line, @"[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}");
+                if (!guidMatch.Success) continue;
+
+                string guid = guidMatch.Value;
+                string name = line;
+
+                int open = line.IndexOf('(');
+                int close = line.LastIndexOf(')');
+
+                if (open >= 0 && close > open)
+                    name = line.Substring(open + 1, close - open - 1).Trim();
+
+                bool isActive = line.Contains("*");
+
+                plans.Add(new PowerPlanInfo
+                {
+                    Guid = guid,
+                    Name = name,
+                    IsActive = isActive
+                });
+            }
+
+            return plans;
+        }
+
+        private class PowerPlanInfo
+        {
+            public string Guid { get; set; }
+            public string Name { get; set; }
+            public bool IsActive { get; set; }
         }
 
         [KernelFunction("RequestPowerPlanChange")]
@@ -384,6 +508,39 @@ namespace AiSystemMonitor.Plugins
             _pendingPowerPlanGuid = guid;
             _pendingPowerPlanName = name;
             return $"SUCCESS: Ready to change to '{name}'. Запитай у юзера підтвердження ('так' чи 'ні').";
+        }
+
+        [KernelFunction("RequestPowerPlanChangeByName")]
+        [Description("Готує зміну схеми живлення за назвою. Викликай, коли юзер просить увімкнути збалансований режим, економію або високу продуктивність.")]
+        public string RequestPowerPlanChangeByName(
+        [Description("Назва або частина назви схеми живлення, наприклад: 'висока продуктивність', 'економія', 'збалансована'")] string planName)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(planName))
+                    return "ERROR|Назва схеми живлення порожня.";
+
+                var plans = ReadPowerPlans();
+
+                var selected = plans.FirstOrDefault(p =>
+                    p.Name.Contains(planName, StringComparison.OrdinalIgnoreCase) ||
+                    planName.Contains(p.Name, StringComparison.OrdinalIgnoreCase));
+
+                if (selected == null)
+                {
+                    string available = string.Join(", ", plans.Select(p => p.Name));
+                    return $"NOT_FOUND|Не знайшов схему живлення «{planName}». Доступні: {available}";
+                }
+
+                _pendingPowerPlanGuid = selected.Guid;
+                _pendingPowerPlanName = selected.Name;
+
+                return $"APPROVE_REQUIRED|Змінити режим електроживлення на «{selected.Name}»? Напиши «так», щоб підтвердити.";
+            }
+            catch (Exception ex)
+            {
+                return $"ERROR|Помилка підготовки зміни живлення: {ex.Message}";
+            }
         }
 
         [KernelFunction("ConfirmPowerPlanChange")]
@@ -416,23 +573,111 @@ namespace AiSystemMonitor.Plugins
             }
         }
 
-        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ коли юзер питає про автозавантаження або чому ПК довго вмикається. Повертає список програм.")]
+        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ коли юзер питає про автозавантаження, стартап або чому ПК довго вмикається. Показує програми автозапуску зі статусом увімкнено/вимкнено.")]
         public string GetStartupApps()
         {
             try
             {
-                var sb = new System.Text.StringBuilder();
+                var startupItems = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
                 using (var searcher = new ManagementObjectSearcher("SELECT Name FROM Win32_StartupCommand"))
                 {
                     foreach (ManagementObject obj in searcher.Get())
                     {
-                        string name = obj["Name"]?.ToString() ?? "";
-                        if (!string.IsNullOrWhiteSpace(name)) sb.AppendLine($"- {name}");
+                        string name = obj["Name"]?.ToString()?.Trim() ?? "";
+                        if (!string.IsNullOrWhiteSpace(name) && !startupItems.ContainsKey(name))
+                            startupItems[name] = "зареєстровано";
                     }
                 }
-                return sb.Length > 0 ? sb.ToString() : "EMPTY_STARTUP";
+
+                var approvedStatuses = GetStartupApprovedStatuses();
+
+                var sb = new StringBuilder();
+                sb.AppendLine("Програми автозавантаження:");
+
+                foreach (var item in startupItems.OrderBy(x => x.Key))
+                {
+                    string status = "статус невідомий";
+
+                    var matched = approvedStatuses
+                        .FirstOrDefault(x =>
+                            x.Key.Equals(item.Key, StringComparison.OrdinalIgnoreCase) ||
+                            x.Key.Contains(item.Key, StringComparison.OrdinalIgnoreCase) ||
+                            item.Key.Contains(x.Key, StringComparison.OrdinalIgnoreCase));
+
+                    if (!string.IsNullOrWhiteSpace(matched.Key))
+                        status = matched.Value;
+
+                    sb.AppendLine($"- {item.Key} — {status}");
+                }
+
+                if (startupItems.Count == 0)
+                    return "Автозавантаження порожнє або недоступне для читання.";
+
+                sb.AppendLine();
+                sb.AppendLine("Примітка: це програми, зареєстровані в автозавантаженні. Частина з них може бути вимкнена в диспетчері задач.");
+
+                return sb.ToString().Trim();
             }
-            catch (Exception ex) { return $"Помилка читання WMI: {ex.Message}"; }
+            catch (Exception ex)
+            {
+                return $"Помилка читання автозавантаження: {ex.Message}";
+            }
+        }
+
+        private Dictionary<string, string> GetStartupApprovedStatuses()
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            string[] subKeys =
+            {
+        @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+        @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32",
+        @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+    };
+
+            RegistryHive[] hives =
+            {
+        RegistryHive.CurrentUser,
+        RegistryHive.LocalMachine
+    };
+
+            foreach (var hive in hives)
+            {
+                foreach (var subKey in subKeys)
+                {
+                    try
+                    {
+                        using var baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry64);
+                        using var key = baseKey.OpenSubKey(subKey);
+
+                        if (key == null) continue;
+
+                        foreach (var valueName in key.GetValueNames())
+                        {
+                            var value = key.GetValue(valueName) as byte[];
+                            if (value == null || value.Length == 0) continue;
+
+                            // У StartupApproved перший байт часто означає стан:
+                            // 0x02 — увімкнено, 0x03 — вимкнено
+                            string status = value[0] switch
+                            {
+                                0x02 => "увімкнено",
+                                0x03 => "вимкнено",
+                                _ => "статус невідомий"
+                            };
+
+                            result[valueName] = status;
+                        }
+                    }
+                    catch
+                    {
+                        // Ігноруємо недоступні гілки реєстру
+                    }
+                }
+            }
+
+            return result;
         }
 
         private bool _pendingMaxPower = false;
@@ -624,6 +869,196 @@ namespace AiSystemMonitor.Plugins
             }
 
             return sb.ToString().Trim();
+        }
+
+        [KernelFunction, Description("Перший етап очищення ПК. Аналізує тимчасові файли Windows і користувача, але нічого не видаляє без підтвердження.")]
+        public string AnalyzeTempCleanup()
+        {
+            try
+            {
+                _pendingCleanupFiles.Clear();
+
+                var tempFolders = new List<string>
+        {
+            Path.GetTempPath(),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp")
+        };
+
+                long totalBytes = 0;
+                int totalFiles = 0;
+
+                foreach (var folder in tempFolders.Distinct())
+                {
+                    if (!Directory.Exists(folder)) continue;
+
+                    foreach (var file in SafeEnumerateFiles(folder))
+                    {
+                        try
+                        {
+                            var info = new FileInfo(file);
+
+                            // Щоб не чіпати активні тимчасові файли
+                            if (info.LastWriteTime > DateTime.Now.AddDays(-1))
+                                continue;
+
+                            totalBytes += info.Length;
+                            totalFiles++;
+                            _pendingCleanupFiles.Add(file);
+
+                            // Захист від дуже довгого аналізу
+                            if (totalFiles >= 5000)
+                                break;
+                        }
+                        catch { }
+                    }
+                }
+
+                double totalMb = totalBytes / 1024.0 / 1024.0;
+
+                if (totalFiles == 0)
+                    return "EMPTY|Не знайшов безпечних тимчасових файлів для очищення.";
+
+                return $"APPROVE_REQUIRED|Знайдено приблизно {totalFiles} тимчасових файлів на {totalMb:F1} МБ. Напиши «так», щоб очистити.";
+            }
+            catch (Exception ex)
+            {
+                _pendingCleanupFiles.Clear();
+                return $"ERROR|Помилка аналізу очищення: {ex.Message}";
+            }
+        }
+
+        [KernelFunction, Description("ВИКЛИКАЙ ЦЕ ТІЛЬКИ коли юзер просить технічну інформацію про конкретний процес: RAM, шлях, кількість процесів, ресурси. НЕ викликай, якщо юзер питає 'що таке Discord/Steam/Chrome' — тоді відповідай звичайним текстом.")]
+        public string GetProcessDetails(
+    [Description("Назва процесу без .exe, наприклад chrome, discord, steam")] string processName)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(processName))
+                    return "ERROR|Назва процесу порожня.";
+
+                processName = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase).Trim();
+
+                var processes = Process.GetProcessesByName(processName);
+
+                if (processes.Length == 0)
+                    return $"NOT_FOUND|Процес {processName} не знайдено серед запущених.";
+
+                long totalMemory = 0;
+                var paths = new HashSet<string>();
+                int windowCount = 0;
+
+                foreach (var p in processes)
+                {
+                    try { totalMemory += p.WorkingSet64; } catch { }
+
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(p.MainModule?.FileName))
+                            paths.Add(p.MainModule.FileName);
+                    }
+                    catch { }
+
+                    try
+                    {
+                        if (p.MainWindowHandle != IntPtr.Zero)
+                            windowCount++;
+                    }
+                    catch { }
+                }
+
+                double memoryMb = totalMemory / 1024.0 / 1024.0;
+
+                var sb = new StringBuilder();
+                sb.AppendLine($"Інформація про процес {processName}:");
+                sb.AppendLine($"- Кількість процесів: {processes.Length}");
+                sb.AppendLine($"- Використання RAM: {memoryMb:F0} МБ");
+                sb.AppendLine($"- Вікон з інтерфейсом: {windowCount}");
+
+                if (paths.Count > 0)
+                {
+                    sb.AppendLine("- Шлях:");
+                    foreach (var path in paths.Take(3))
+                        sb.AppendLine($"  {path}");
+                }
+                else
+                {
+                    sb.AppendLine("- Шлях: недоступний");
+                }
+
+                sb.AppendLine("- Закривати можна тільки після підтвердження користувача.");
+
+                return sb.ToString().Trim();
+            }
+            catch (Exception ex)
+            {
+                return $"ERROR|Помилка отримання інформації про процес: {ex.Message}";
+            }
+        }
+
+        [KernelFunction, Description("Другий етап очищення ПК. Видаляє тільки ті тимчасові файли, які були знайдені через AnalyzeTempCleanup. Викликати тільки після підтвердження користувача.")]
+        public string ConfirmTempCleanup()
+        {
+            try
+            {
+                if (_pendingCleanupFiles.Count == 0)
+                    return "ERROR|Немає підготовленого очищення. Спочатку треба викликати AnalyzeTempCleanup.";
+
+                int deleted = 0;
+                long freedBytes = 0;
+
+                foreach (var file in _pendingCleanupFiles.ToList())
+                {
+                    try
+                    {
+                        if (!File.Exists(file)) continue;
+
+                        var info = new FileInfo(file);
+                        long size = info.Length;
+
+                        File.Delete(file);
+
+                        deleted++;
+                        freedBytes += size;
+                    }
+                    catch
+                    {
+                        // Файл може бути зайнятий системою — це нормально
+                    }
+                }
+
+                _pendingCleanupFiles.Clear();
+
+                double freedMb = freedBytes / 1024.0 / 1024.0;
+                return $"SUCCESS|Очищення завершено. Видалено файлів: {deleted}. Звільнено приблизно {freedMb:F1} МБ.";
+            }
+            catch (Exception ex)
+            {
+                _pendingCleanupFiles.Clear();
+                return $"ERROR|Помилка очищення: {ex.Message}";
+            }
+        }
+
+        private IEnumerable<string> SafeEnumerateFiles(string root)
+        {
+            var files = new List<string>();
+
+            try
+            {
+                files.AddRange(Directory.EnumerateFiles(root));
+            }
+            catch { }
+
+            try
+            {
+                foreach (var dir in Directory.EnumerateDirectories(root))
+                {
+                    foreach (var file in SafeEnumerateFiles(dir))
+                        files.Add(file);
+                }
+            }
+            catch { }
+
+            return files;
         }
     }
 }
