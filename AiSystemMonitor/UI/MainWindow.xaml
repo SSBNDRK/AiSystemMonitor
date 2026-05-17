@@ -298,7 +298,10 @@
                                     <TextBlock Text="Налаштування" Foreground="#CBA6F7" FontSize="16" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <TextBlock Text="Локальна модель (Ollama):" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,5"/>
-                                <ComboBox x:Name="OllamaModelSelector" Height="38" Margin="0,0,0,15" Foreground="#CDD6F4" FontSize="13" MaxDropDownHeight="120" Cursor="Hand">
+                                <ComboBox x:Name="OllamaModelSelector" Height="38" Margin="0,0,0,15" Foreground="#CDD6F4" FontSize="13" Cursor="Hand"
+          VirtualizingPanel.ScrollUnit="Pixel"
+          ScrollViewer.CanContentScroll="True">
+
                                     <ComboBox.Template>
                                         <ControlTemplate TargetType="ComboBox">
                                             <Grid>
@@ -331,13 +334,22 @@
                                                 <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" Margin="12,0,30,0" VerticalAlignment="Center" HorizontalAlignment="Left" />
 
                                                 <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
-                                                    <Grid Width="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
-                                                        <Border x:Name="DropDownBorder" Background="#1E1E2E" BorderBrush="#45475A" BorderThickness="1" CornerRadius="8" Margin="0,5,0,5">
-                                                            <ScrollViewer Margin="2,4,8,4" Padding="0" SnapsToDevicePixels="True">
-                                                                <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
-                                                            </ScrollViewer>
-                                                        </Border>
-                                                    </Grid>
+                                                    <Border x:Name="DropDownBorder"
+                            Width="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                            MaxHeight="125"
+                            Background="#1E1E2E"
+                            BorderBrush="#45475A"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Margin="0,5,0,0"
+                            Padding="2,4,2,4"
+                            SnapsToDevicePixels="True">
+
+                                                        <ScrollViewer Margin="0" Padding="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" SnapsToDevicePixels="True">
+                                                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
+                                                        </ScrollViewer>
+
+                                                    </Border>
                                                 </Popup>
                                             </Grid>
                                         </ControlTemplate>
@@ -347,16 +359,16 @@
                                         <Style TargetType="ComboBoxItem">
                                             <Setter Property="HorizontalContentAlignment" Value="Left"/>
                                             <Setter Property="VerticalContentAlignment" Value="Center"/>
-
                                             <Setter Property="Padding" Value="7,8,10,8"/>
-                                            <Setter Property="Margin" Value="2,2,2,2"/>
                                             <Setter Property="Cursor" Value="Hand"/>
                                             <Setter Property="Foreground" Value="#BAC2DE"/>
                                             <Setter Property="Template">
                                                 <Setter.Value>
                                                     <ControlTemplate TargetType="ComboBoxItem">
-                                                        <Border x:Name="ItemBorder" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="{TemplateBinding Margin}">
-                                                            <ContentPresenter />
+                                                        <Border Background="Transparent" Padding="2">
+                                                            <Border x:Name="ItemBorder" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                                                <ContentPresenter />
+                                                            </Border>
                                                         </Border>
                                                         <ControlTemplate.Triggers>
                                                             <Trigger Property="IsMouseOver" Value="True">
@@ -440,13 +452,19 @@
                             </TextBlock>
 
                             <Popup x:Name="CommandPopup" PlacementTarget="{Binding ElementName=UserInputBox}" Placement="Top" IsOpen="False" StaysOpen="False" AllowsTransparency="True">
-                                <Border Background="#1E1E2E" BorderBrush="#313244" BorderThickness="1" CornerRadius="8" Padding="5" Margin="0,0,0,5">
-                                    <ListBox x:Name="CommandListBox" Background="Transparent" BorderThickness="0" Foreground="#BAC2DE"
-                                             PreviewMouseLeftButtonUp="CommandListBox_PreviewMouseLeftButtonUp" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <Border Background="#1E1E2E" BorderBrush="#313244" BorderThickness="1" CornerRadius="8" Padding="5" Margin="0,0,0,8">
+
+                                    <ListBox x:Name="CommandListBox" Background="Transparent" BorderThickness="0" Padding="0" Margin="0" Foreground="#BAC2DE"
+                 PreviewMouseLeftButtonUp="CommandListBox_PreviewMouseLeftButtonUp" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+
                                         <ListBox.ItemContainerStyle>
                                             <Style TargetType="ListBoxItem">
-                                                <Setter Property="Padding" Value="8,5" />
+                                                <Setter Property="Padding" Value="10,6" />
+                                                <Setter Property="Margin" Value="0" />
+                                                <Setter Property="MinHeight" Value="10" />
+                                                <Setter Property="BorderThickness" Value="0" />
                                                 <Setter Property="Cursor" Value="Hand" />
+
                                                 <Style.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
                                                         <Setter Property="Background" Value="#313244" />

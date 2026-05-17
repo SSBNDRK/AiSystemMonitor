@@ -44,7 +44,9 @@ namespace AiSystemMonitor
             var models = await _aiEngine.GetAvailableOllamaModelsAsync();
 
             OllamaModelSelector.Items.Clear();
-            foreach (var m in models) OllamaModelSelector.Items.Add(m);
+
+            foreach (var m in models)
+                OllamaModelSelector.Items.Add(m);
 
             string savedModel = AppConfig.OllamaModel;
 
